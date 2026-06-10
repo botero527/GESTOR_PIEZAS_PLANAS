@@ -5,8 +5,7 @@ import threading
 import os
 from pathlib import Path
 
-from dxf_processor import process_dxf
-#2pc dos lineas 
+from dxf_processor import process_dxf, get_all_open_documents  # noqa: F401 used in _step_file
 # ── Tema ──────────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -68,12 +67,14 @@ class App(ctk.CTk):
         self.configure(fg_color=SURFACE2)
 
         # State
-        self.dxf_path   = ctk.StringVar()
-        self.tecoflex   = None   # True / False
-        self.tipo       = None   # "PC" / "AL" / "PC_AL"
-        self.num_pc     = None   # 1 / 2
-        self.save_path  = None   # ruta de guardado elegida por el usuario
-        self.step       = 0
+        self.dxf_path    = ctk.StringVar()
+        self.acad_doc    = None  # dict {name, path, app, doc} seleccionado
+        self.tecoflex    = None
+        self.tipo        = None   # "PC" / "AL" / "PC_AL"
+        self.num_pc      = None   # 1 / 2
+        self.save_folder = None   # solo para PC_AL
+        self.save_name   = None   # nombre del archivo PC separado
+        self.step        = 0
 
         self._build_header()
         self._build_step_bar()
@@ -142,63 +143,76 @@ class App(ctk.CTk):
          4: self._step_processing,
          5: self._step_result}[step]()
 
-    # ── Paso 0: Conectar a AutoCAD ───────────────────────────────────────────
+    # ── Paso 0: Seleccionar archivo de AutoCAD ───────────────────────────────
 
     def _step_file(self):
-        from dxf_processor import get_active_file_info
-
         card = Card(self.content)
         card.pack(fill="both", expand=True)
 
-        ctk.CTkLabel(card, text="Conectar a AutoCAD",
-                     font=FONT_HEADER, text_color=TEXT).pack(pady=(28, 6))
+        ctk.CTkLabel(card, text="Seleccionar archivo",
+                     font=FONT_HEADER, text_color=TEXT).pack(pady=(20, 4))
         ctk.CTkLabel(card,
-                     text="Ten el archivo DWG abierto en AutoCAD\nantes de continuar.",
-                     font=FONT_BODY, text_color=SUBTEXT, justify="center").pack(pady=(0, 16))
+                     text="Archivos DWG abiertos en AutoCAD:",
+                     font=FONT_SMALL, text_color=SUBTEXT).pack(pady=(0, 8))
 
-        # Panel de estado
-        status_box = ctk.CTkFrame(card, fg_color="#1a2640", corner_radius=10,
-                                  border_width=2, border_color="#334155", height=100)
-        status_box.pack(fill="x", padx=24, pady=(0, 16))
-        status_box.pack_propagate(False)
-
-        self._ac_icon  = ctk.CTkLabel(status_box, text="⏳", font=("Segoe UI", 30))
-        self._ac_icon.pack(pady=(12, 2))
-        self._ac_label = ctk.CTkLabel(status_box, text="Buscando AutoCAD…",
-                                      font=FONT_SMALL, text_color=SUBTEXT)
-        self._ac_label.pack()
-
-        self._btn_connect = BigButton(card, "🔄  Detectar AutoCAD",
-                                      command=self._detect_autocad)
-        self._btn_connect.pack(padx=24, fill="x", pady=(0, 8))
+        # Lista scrollable de documentos
+        self._list_frame = ctk.CTkScrollableFrame(card, fg_color="#1a2640",
+                                                   corner_radius=10, height=200)
+        self._list_frame.pack(fill="x", padx=24, pady=(0, 10))
 
         self._btn_next_file = BigButton(card, "Continuar →",
                                         command=lambda: self._show_step(1),
                                         color="#1e3a2f")
-        self._btn_next_file.pack(padx=24, fill="x", pady=(0, 20))
+        self._btn_next_file.pack(padx=24, fill="x", pady=(0, 6))
         self._btn_next_file.configure(state="disabled")
 
-        # Intentar conectar automáticamente al abrir
-        self.after(300, self._detect_autocad)
+        BigButton(card, "🔄  Actualizar lista",
+                  command=self._refresh_doc_list,
+                  color="#1e293b").pack(padx=24, fill="x", pady=(0, 10))
 
-    def _detect_autocad(self):
-        from dxf_processor import get_active_file_info
-        info = get_active_file_info()
-        if info["ok"]:
-            self._ac_icon.configure(text="✅")
-            name = info["name"] or "Archivo sin nombre"
-            self._ac_label.configure(
-                text=f"{name}", text_color=SUCCESS
-            )
-            self.dxf_path.set(info["path"])
-            self._btn_next_file.configure(state="normal", fg_color=ACCENT)
-        else:
-            self._ac_icon.configure(text="❌")
-            self._ac_label.configure(
-                text="AutoCAD no detectado. Ábrelo e intenta de nuevo.",
-                text_color=DANGER
-            )
+        self.after(200, self._refresh_doc_list)
+
+    def _refresh_doc_list(self):
+        # Limpiar lista
+        for w in self._list_frame.winfo_children():
+            w.destroy()
+
+        docs = get_all_open_documents()
+
+        if not docs:
+            ctk.CTkLabel(self._list_frame,
+                         text="No se encontró AutoCAD abierto.\nAbre un DWG e intenta de nuevo.",
+                         font=FONT_SMALL, text_color=DANGER).pack(pady=20)
             self._btn_next_file.configure(state="disabled", fg_color="#1e3a2f")
+            return
+
+        self._doc_buttons = []
+        for d in docs:
+            btn = ctk.CTkButton(
+                self._list_frame,
+                text=f"  📄  {d['name']}",
+                font=FONT_BODY,
+                anchor="w",
+                fg_color="#1e293b",
+                hover_color="#2d4a6e",
+                text_color=SUBTEXT,
+                corner_radius=8,
+                height=40,
+                command=lambda doc=d: self._select_doc(doc),
+            )
+            btn.pack(fill="x", padx=4, pady=3)
+            self._doc_buttons.append((btn, d))
+
+    def _select_doc(self, doc: dict):
+        self.acad_doc = doc
+        self.dxf_path.set(doc["path"])
+        # Resaltar el botón seleccionado
+        for btn, d in self._doc_buttons:
+            if d["path"] == doc["path"]:
+                btn.configure(fg_color=ACCENT, text_color=TEXT)
+            else:
+                btn.configure(fg_color="#1e293b", text_color=SUBTEXT)
+        self._btn_next_file.configure(state="normal", fg_color=ACCENT)
 
     # ── Paso 1: ¿Tiene Tecoflex? ─────────────────────────────────────────────
 
@@ -252,9 +266,9 @@ class App(ctk.CTk):
             def sel(v=val):
                 self.tipo = v
                 if v == "AL":
-                    self._show_step(4)   # AL no necesita num_pc → directo a procesar
+                    self._start_processing_direct()  # AL: no hay PC, procesar directo
                 else:
-                    self._show_step(3)
+                    self._show_step(3)  # PC o PC_AL: preguntar cuántos PC
             BigButton(card, lbl, command=sel, color=col, width=280
                       ).pack(pady=6)
 
@@ -273,10 +287,10 @@ class App(ctk.CTk):
                      font=FONT_HEADER, text_color=TEXT).pack(pady=(44, 8))
 
         src = "TECOFLEX" if self.tecoflex else "PERÍMETRO"
-        offsets = {"1 PC": "2 mm", "2 PC": "1 mm"}
         ctk.CTkLabel(card,
                      text=f"El offset del PC se calcula desde el layer {src}.\n"
-                          f"  • 1 PC → offset 2 mm\n  • 2 PC → offset 1 mm",
+                          f"  • 1 PC → layer PC_1 (offset 1 mm)\n"
+                          f"  • 2 PC → layer PC_1 (1 mm) + PC_2 (2 mm)",
                      font=FONT_BODY, text_color=SUBTEXT, justify="left").pack(pady=(0, 30), padx=40)
 
         row = ctk.CTkFrame(card, fg_color="transparent")
@@ -284,7 +298,11 @@ class App(ctk.CTk):
 
         def sel(val):
             self.num_pc = val
-            self._show_step(4)
+            # PC_AL → pedir dónde guardar el archivo PC; otros → procesar directo
+            if self.tipo == "PC_AL":
+                self._show_step(4)
+            else:
+                self._start_processing_direct()
 
         BigButton(row, "1  PC", command=lambda: sel(1),
                   color="#1e3a5f", width=160).pack(side="left", padx=16)
@@ -296,54 +314,75 @@ class App(ctk.CTk):
                       hover_color="#1e293b",
                       command=lambda: self._show_step(2)).pack(pady=(30, 0))
 
-    # ── Paso 4: Elegir carpeta de guardado + procesar ────────────────────────
+    # ── Paso 4: Solo para PC+AL — elegir carpeta y nombre del archivo PC ──────
 
     def _step_processing(self):
+        """Paso 4: pedir destino del archivo PC separado (solo para PC_AL)."""
         card = Card(self.content)
         card.pack(fill="both", expand=True)
 
-        ctk.CTkLabel(card, text="¿Dónde guardar el archivo?",
-                     font=FONT_HEADER, text_color=TEXT).pack(pady=(32, 6))
-        ctk.CTkLabel(card, text="Elige la carpeta donde se guardará el DWG procesado.",
-                     font=FONT_BODY, text_color=SUBTEXT).pack(pady=(0, 16))
+        ctk.CTkLabel(card, text="Guardar archivo PC (espejo)",
+                     font=FONT_HEADER, text_color=TEXT).pack(pady=(24, 4))
+        ctk.CTkLabel(card,
+                     text="Elige la carpeta y el nombre del archivo DWG\nque contendrá solo los layers PC (con espejo).",
+                     font=FONT_BODY, text_color=SUBTEXT, justify="center").pack(pady=(0, 14))
 
-        # Panel ruta
-        path_box = ctk.CTkFrame(card, fg_color="#1a2640", corner_radius=10,
-                                border_width=2, border_color="#334155", height=70)
-        path_box.pack(fill="x", padx=24, pady=(0, 14))
-        path_box.pack_propagate(False)
-
-        self._save_icon  = ctk.CTkLabel(path_box, text="📁", font=("Segoe UI", 24))
-        self._save_icon.pack(side="left", padx=12)
-        self._save_label = ctk.CTkLabel(path_box, text="Ninguna carpeta seleccionada",
-                                        font=FONT_SMALL, text_color=SUBTEXT, anchor="w")
-        self._save_label.pack(side="left", fill="x", expand=True)
+        # Carpeta
+        folder_box = ctk.CTkFrame(card, fg_color="#1a2640", corner_radius=8,
+                                  border_width=2, border_color="#334155", height=56)
+        folder_box.pack(fill="x", padx=24, pady=(0, 6))
+        folder_box.pack_propagate(False)
+        self._folder_icon  = ctk.CTkLabel(folder_box, text="📁", font=("Segoe UI", 20))
+        self._folder_icon.pack(side="left", padx=10)
+        self._folder_label = ctk.CTkLabel(folder_box, text="Sin carpeta",
+                                          font=FONT_SMALL, text_color=SUBTEXT, anchor="w")
+        self._folder_label.pack(side="left", fill="x", expand=True)
 
         BigButton(card, "📂  Elegir carpeta…",
-                  command=self._pick_save_folder).pack(padx=24, fill="x", pady=(0, 8))
+                  command=self._pick_save_folder).pack(padx=24, fill="x", pady=(0, 10))
+
+        # Nombre del archivo
+        ctk.CTkLabel(card, text="Nombre del archivo:", font=FONT_SMALL,
+                     text_color=SUBTEXT, anchor="w").pack(padx=24, fill="x")
+        self._name_entry = ctk.CTkEntry(card, placeholder_text="Ej: pieza_PC",
+                                        font=FONT_BODY, height=38)
+        self._name_entry.pack(padx=24, fill="x", pady=(4, 12))
 
         self._btn_procesar = BigButton(card, "⚙️  Procesar ahora",
-                                       command=self._start_processing,
+                                       command=self._validate_and_process,
                                        color="#14532d")
-        self._btn_procesar.pack(padx=24, fill="x", pady=(0, 8))
-        self._btn_procesar.configure(state="disabled")
+        self._btn_procesar.pack(padx=24, fill="x", pady=(0, 6))
 
         ctk.CTkButton(card, text="← Atrás", font=FONT_SMALL,
                       fg_color="transparent", text_color=SUBTEXT,
                       hover_color="#1e293b",
-                      command=lambda: self._show_step(2 if self.tipo == "AL" else 3)
-                      ).pack(pady=(4, 0))
+                      command=lambda: self._show_step(3)).pack(pady=(2, 0))
 
     def _pick_save_folder(self):
         folder = filedialog.askdirectory(title="Elegir carpeta de destino")
         if folder:
-            self.save_path = folder
-            self._save_label.configure(text=folder, text_color=TEXT)
-            self._save_icon.configure(text="✅")
-            self._btn_procesar.configure(state="normal", fg_color=ACCENT)
+            self.save_folder = folder
+            self._folder_label.configure(text=folder, text_color=TEXT)
+            self._folder_icon.configure(text="✅")
+
+    def _validate_and_process(self):
+        name = self._name_entry.get().strip()
+        if not self.save_folder:
+            messagebox.showwarning("Falta carpeta", "Elige una carpeta de destino.")
+            return
+        if not name:
+            messagebox.showwarning("Falta nombre", "Escribe el nombre del archivo.")
+            return
+        self.save_name = name
+        self._start_processing()
+
+    def _start_processing_direct(self):
+        """Inicia procesado sin pedir ruta (caso PC solo o AL solo)."""
+        self.save_folder = None
+        self.save_name   = None
+        self._start_processing()
 
     def _start_processing(self):
-        # Reemplazar contenido con barra de progreso
         self._clear_content()
         card = Card(self.content)
         card.pack(fill="both", expand=True)
@@ -360,11 +399,12 @@ class App(ctk.CTk):
     def _run_processing(self):
         try:
             result = process_dxf(
-                dxf_path=self.dxf_path.get(),
-                has_tecoflex=self.tecoflex,
-                tipo=self.tipo,
-                num_pc=self.num_pc if self.num_pc else 1,
-                save_folder=self.save_path,
+                has_tecoflex = self.tecoflex,
+                tipo         = self.tipo,
+                num_pc       = self.num_pc if self.num_pc else 1,
+                save_folder  = self.save_folder,
+                save_name    = self.save_name,
+                acad_doc     = self.acad_doc,
             )
             self._result = result
             self.after(0, lambda: self._show_step(5))
@@ -415,10 +455,11 @@ class App(ctk.CTk):
             lines.append("• Layer TECOFLEX: offset 3 mm desde PERÍMETRO (rojo)")
         if self.tipo in ("PC", "PC_AL"):
             src = "TECOFLEX" if self.tecoflex else "PERÍMETRO"
-            off = 2 if self.num_pc == 1 else 1
-            lines.append(f"• Layer PC: offset {off} mm desde {src} (cian)")
+            lines.append(f"• Layer PC_1: offset 1 mm desde {src} (cian)")
+            if self.num_pc == 2:
+                lines.append(f"• Layer PC_2: offset 2 mm desde {src} (azul)")
         if self.tipo == "PC_AL":
-            lines.append("• Archivo PC separado creado")
+            lines.append("• Archivo PC separado (con espejo) creado")
 
         summary = ctk.CTkFrame(card, fg_color="transparent")
         summary.pack(fill="x", padx=24)
@@ -440,10 +481,12 @@ class App(ctk.CTk):
 
     def _reset(self):
         self.dxf_path.set("")
-        self.tecoflex = None
-        self.tipo = None
-        self.num_pc = None
-        self.save_path = None
+        self.acad_doc    = None
+        self.tecoflex    = None
+        self.tipo        = None
+        self.num_pc      = None
+        self.save_folder = None
+        self.save_name   = None
         self._show_step(0)
 
 

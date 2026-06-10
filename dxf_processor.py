@@ -11,27 +11,71 @@ COLOR_BLUE   = 5   # PC_2
 
 # ── Conexión ──────────────────────────────────────────────────────────────────
 
-def get_autocad():
+def get_all_open_documents() -> list:
+    """
+    Enumera todos los DWG abiertos en TODAS las instancias de AutoCAD.
+    Escanea el ROT completo sin filtrar por nombre — así encuentra
+    múltiples instancias de AutoCAD y todas sus pestañas.
+    """
     pythoncom.CoInitialize()
+    results   = []
+    seen_paths = set()
+    seen_apps  = set()   # identificador estable por instancia
+
+    def _harvest_app(app):
+        """Extrae todos los documentos de una instancia de AutoCAD."""
+        try:
+            # Identificador estable: nombre del exe + hwnd de la ventana
+            app_key = f"{app.Name}_{app.Hwnd}"
+        except Exception:
+            app_key = str(id(app))
+        if app_key in seen_apps:
+            return
+        seen_apps.add(app_key)
+        try:
+            for i in range(app.Documents.Count):
+                doc = app.Documents.Item(i)
+                path = doc.FullName or doc.Name
+                if path not in seen_paths:
+                    seen_paths.add(path)
+                    results.append({"name": doc.Name, "path": path,
+                                    "app": app, "doc": doc})
+        except Exception:
+            pass
+
+    # ── Estrategia 1: ROT completo, probar cada objeto ────────────────────
     try:
-        acad = win32com.client.GetActiveObject("AutoCAD.Application")
+        rot = pythoncom.GetRunningObjectTable()
+        for moniker in rot.EnumRunning():
+            try:
+                raw  = rot.GetObject(moniker)
+                disp = raw.QueryInterface(pythoncom.IID_IDispatch)
+                app  = win32com.client.Dispatch(disp)
+                # Si tiene Documents.Count es AutoCAD
+                _ = app.Documents.Count
+                _harvest_app(app)
+            except Exception:
+                pass
     except Exception:
-        raise RuntimeError(
-            "No se encontró AutoCAD abierto.\n\n"
-            "Abre AutoCAD y ten el archivo listo antes de procesar."
-        )
-    doc = acad.ActiveDocument
-    if doc is None:
-        raise RuntimeError("No hay ningún archivo abierto en AutoCAD.")
-    return acad, doc, doc.ModelSpace
+        pass
+
+    # ── Estrategia 2: GetActiveObject como fallback ───────────────────────
+    try:
+        app = win32com.client.GetActiveObject("AutoCAD.Application")
+        _harvest_app(app)
+    except Exception:
+        pass
+
+    return results
 
 
 def get_active_file_info() -> dict:
-    try:
-        _, doc, _ = get_autocad()
-        return {"name": doc.Name, "path": doc.FullName, "ok": True}
-    except Exception as e:
-        return {"name": "", "path": "", "ok": False, "error": str(e)}
+    """Devuelve el primer documento encontrado (para compatibilidad)."""
+    docs = get_all_open_documents()
+    if docs:
+        return {"name": docs[0]["name"], "path": docs[0]["path"], "ok": True}
+    return {"name": "", "path": "", "ok": False,
+            "error": "No se encontró AutoCAD abierto."}
 
 
 # ── Layers ────────────────────────────────────────────────────────────────────
@@ -190,10 +234,39 @@ def _create_pc_file(acad, pc_groups, save_path):
 
 # ── Función principal ─────────────────────────────────────────────────────────
 
-def process_dxf(dxf_path=None, has_tecoflex=False, tipo="PC", num_pc=1,
-                save_folder=None, save_name=None) -> dict:
-    """Procesa el archivo activo en AutoCAD usando Offset nativo."""
-    acad, doc, msp = get_autocad()
+def _get_live_doc(acad_doc: dict):
+    """
+    Re-obtiene el documento vivo desde AutoCAD usando la ruta guardada.
+    Evita usar objetos COM cacheados que pueden expirar.
+    """
+    pythoncom.CoInitialize()
+    target_path = acad_doc.get("path", "")
+    target_name = acad_doc.get("name", "")
+
+    all_docs = get_all_open_documents()
+    for d in all_docs:
+        if d["path"] == target_path or d["name"] == target_name:
+            return d["app"], d["doc"]
+
+    raise RuntimeError(
+        f"No se encontró el archivo '{target_name}' en AutoCAD.\n"
+        "Asegúrate de que sigue abierto."
+    )
+
+
+def process_dxf(_dxf_path=None, has_tecoflex=False, tipo="PC", num_pc=1,
+                save_folder=None, save_name=None, acad_doc=None) -> dict:
+    """Procesa el documento de AutoCAD especificado usando Offset nativo."""
+    pythoncom.CoInitialize()
+    if acad_doc is not None:
+        acad, doc = _get_live_doc(acad_doc)
+    else:
+        docs = get_all_open_documents()
+        if not docs:
+            raise RuntimeError("No se encontró AutoCAD abierto.")
+        acad, doc = docs[0]["app"], docs[0]["doc"]
+
+    msp = doc.ModelSpace
 
     # Buscar PERIMETRO
     perimetro_entities = [
