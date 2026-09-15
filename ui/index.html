@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Piezas Planas</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Fondo decorativo: partículas con gravedad + glow de cursor -->
+  <canvas id="bg-canvas"></canvas>
+  <div class="glow-layer" id="glow-layer"></div>
+
+  <!-- Overlay de impacto/shockwave para acciones principales -->
+  <canvas id="impact-canvas" class="hide"></canvas>
+
+  <div class="titlebar pywebview-drag-region">
+    <div class="titlebar-brand">
+      <img src="assets/logo.png" alt="AGP" class="titlebar-logo-img" />
+      <span>PIEZAS PLANAS</span>
+      <span class="titlebar-sub">AGP GROUP</span>
+    </div>
+    <div class="titlebar-controls">
+      <button id="btn-min" title="Minimizar">&#8211;</button>
+      <button id="btn-close" title="Cerrar">&#10005;</button>
+    </div>
+  </div>
+
+  <!-- ── Splash ─────────────────────────────────────────────────────── -->
+  <div id="splash" class="splash">
+    <div class="splash-inner">
+      <img src="assets/logo.png" alt="AGP" class="splash-logo" />
+      <div class="splash-title">Piezas&nbsp;Planas</div>
+      <div class="splash-sub">Offsets de corte y perforación · AGP GROUP</div>
+      <div class="splash-arc"></div>
+      <div class="splash-hint">Click para continuar</div>
+    </div>
+  </div>
+
+  <!-- ── Wizard ─────────────────────────────────────────────────────── -->
+  <main id="wizard" class="wizard hide">
+
+    <div class="stepper" id="stepper">
+      <div class="step-dot" data-dot="file"><span class="dot-num">1</span><label>Archivo</label></div>
+      <div class="step-line"></div>
+      <div class="step-dot" data-dot="tecoflex"><span class="dot-num">2</span><label>Tecoflex</label></div>
+      <div class="step-line"></div>
+      <div class="step-dot" data-dot="datos"><span class="dot-num">3</span><label>Datos</label></div>
+      <div class="step-line"></div>
+      <div class="step-dot" data-dot="tabla"><span class="dot-num">4</span><label>Lites</label></div>
+    </div>
+
+    <button class="btn-back" id="btn-back">&larr; Atrás</button>
+
+    <div class="step-viewport" id="step-viewport">
+
+      <!-- Paso: archivo -->
+      <section class="step" data-step="file">
+        <div class="card card-hero">
+          <h2>Selecciona el archivo de AutoCAD</h2>
+          <p class="sub">Elige el DWG que ya tienes abierto en AutoCAD. Si abriste uno nuevo, dale a actualizar.</p>
+
+          <div class="doc-list" id="doc-list">
+            <div class="doc-empty">Buscando documentos abiertos…</div>
+          </div>
+
+          <button class="btn btn-secundario btn-block" id="btn-refresh-docs">
+            <span class="btn-icon">&#8635;</span> Actualizar lista
+          </button>
+
+          <button class="btn btn-primario btn-block btn-cta" id="btn-file-next" disabled>
+            Continuar &rarr;
+          </button>
+        </div>
+      </section>
+
+      <!-- Paso: tecoflex -->
+      <section class="step" data-step="tecoflex">
+        <div class="card card-hero card-center">
+          <h2>¿La pieza tiene TECOFLEX?</h2>
+          <p class="sub">Si tiene TECOFLEX se crea primero un offset de 3&nbsp;mm hacia adentro del layer PERIMETRO,
+             en un nuevo layer TECOFLEX (rojo). Todo lo demás se calcula desde ahí.</p>
+
+          <div class="choice-row">
+            <button class="choice-btn choice-yes" id="btn-teco-si">
+              <span class="choice-icon">&#10003;</span>
+              <span class="choice-label">Sí tiene</span>
+            </button>
+            <button class="choice-btn choice-no" id="btn-teco-no">
+              <span class="choice-icon">&#10005;</span>
+              <span class="choice-label">No tiene</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Paso: datos generales -->
+      <section class="step" data-step="datos">
+        <div class="card card-hero">
+          <h2>Datos generales</h2>
+          <p class="sub">Con esto se arma la tabla de lites y se nombran los archivos de salida.</p>
+
+          <label class="field-label" for="in-cantidad">Cantidad de lites</label>
+          <input type="number" id="in-cantidad" class="field-input" min="1" step="1" value="1" />
+
+          <label class="field-label" for="in-nombre">Nombre general de la pieza</label>
+          <input type="text" id="in-nombre" class="field-input" placeholder="Ej: PUERTA_TORRE1" />
+
+          <label class="field-label">Carpeta de destino</label>
+          <div class="folder-box" id="folder-box">
+            <span class="folder-icon">&#128193;</span>
+            <span class="folder-text" id="folder-text">Sin carpeta seleccionada</span>
+          </div>
+          <button class="btn btn-secundario btn-block" id="btn-elegir-carpeta">
+            Elegir carpeta&hellip;
+          </button>
+
+          <button class="btn btn-primario btn-block btn-cta" id="btn-datos-next">
+            Continuar &rarr;
+          </button>
+        </div>
+      </section>
+
+      <!-- Paso: tabla de lites -->
+      <section class="step step-wide" data-step="tabla">
+        <div class="card card-tabla">
+          <h2>Tabla de lites</h2>
+          <p class="sub">Llena cada fila. La compensación se calcula sola apenas hay tipo + espesor.</p>
+
+          <div class="tabla-wrap">
+            <table id="tabla-lites">
+              <thead>
+                <tr>
+                  <th>Posición</th>
+                  <th>Tipo de cristal</th>
+                  <th>Espesor</th>
+                  <th>Pintura</th>
+                  <th>Caja</th>
+                  <th>Pieza grande</th>
+                  <th>Compensación</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-lites-body"></tbody>
+            </table>
+          </div>
+
+          <button class="btn btn-primario btn-block btn-cta" id="btn-procesar" disabled>
+            &#9881; Procesar
+          </button>
+        </div>
+      </section>
+
+      <!-- Paso: procesando -->
+      <section class="step" data-step="procesando">
+        <div class="card card-hero card-center card-procesando">
+          <div class="loader">
+            <div class="loader-ring"></div>
+            <div class="loader-ring loader-ring-2"></div>
+            <img src="assets/logo.png" class="loader-logo" alt="" />
+          </div>
+          <h2>Procesando…</h2>
+          <p class="sub" id="procesando-texto">Conectando con AutoCAD…</p>
+        </div>
+      </section>
+
+      <!-- Paso: resultado -->
+      <section class="step step-wide" data-step="resultado">
+        <div class="card card-resultado">
+
+          <div id="resultado-ok">
+            <div class="resultado-head">
+              <div class="resultado-icon resultado-icon-ok">&#10003;</div>
+              <h2>¡Proceso completado!</h2>
+            </div>
+
+            <div class="resultado-block">
+              <div class="resultado-row">
+                <span class="resultado-label">Archivo principal</span>
+                <span class="resultado-value" id="res-main"></span>
+              </div>
+              <div class="resultado-row" id="res-comp-row">
+                <span class="resultado-label">Archivo comparativo</span>
+                <span class="resultado-value" id="res-comp"></span>
+              </div>
+            </div>
+
+            <div class="resultado-block">
+              <div class="resultado-block-title">Archivos por lite</div>
+              <div id="res-lites-list" class="res-lites-list"></div>
+            </div>
+
+            <div class="resultado-block">
+              <div class="resultado-block-title">Compensación aplicada</div>
+              <div class="tabla-wrap">
+                <table class="tabla-resumen">
+                  <thead><tr><th>Posición</th><th>Compensación</th><th>Aplica</th></tr></thead>
+                  <tbody id="res-detalle-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="warn-block hide" id="res-warnings"></div>
+
+            <div class="btn-row">
+              <button class="btn btn-secundario" id="btn-abrir-carpeta">&#128193; Abrir carpeta</button>
+              <button class="btn btn-primario" id="btn-procesar-otro">&#8635; Procesar otro</button>
+            </div>
+          </div>
+
+          <div id="resultado-error" class="hide">
+            <div class="resultado-head">
+              <div class="resultado-icon resultado-icon-error">&#10005;</div>
+              <h2>Algo no salió bien</h2>
+            </div>
+            <div class="error-box" id="res-error-msg"></div>
+            <div class="btn-row">
+              <button class="btn btn-secundario" id="btn-error-volver">&larr; Volver a la tabla</button>
+              <button class="btn btn-primario" id="btn-error-reset">&#8635; Empezar de nuevo</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

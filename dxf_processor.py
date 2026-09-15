@@ -14,18 +14,15 @@ COLOR_BLUE   = 5   # PC_2
 def get_all_open_documents() -> list:
     """
     Enumera todos los DWG abiertos en TODAS las instancias de AutoCAD.
-    Escanea el ROT completo sin filtrar por nombre — así encuentra
-    múltiples instancias de AutoCAD y todas sus pestañas.
+    Escanea el ROT completo sin filtrar por nombre.
     """
     pythoncom.CoInitialize()
-    results   = []
+    results    = []
     seen_paths = set()
-    seen_apps  = set()   # identificador estable por instancia
+    seen_apps  = set()
 
     def _harvest_app(app):
-        """Extrae todos los documentos de una instancia de AutoCAD."""
         try:
-            # Identificador estable: nombre del exe + hwnd de la ventana
             app_key = f"{app.Name}_{app.Hwnd}"
         except Exception:
             app_key = str(id(app))
@@ -34,7 +31,7 @@ def get_all_open_documents() -> list:
         seen_apps.add(app_key)
         try:
             for i in range(app.Documents.Count):
-                doc = app.Documents.Item(i)
+                doc  = app.Documents.Item(i)
                 path = doc.FullName or doc.Name
                 if path not in seen_paths:
                     seen_paths.add(path)
@@ -43,7 +40,7 @@ def get_all_open_documents() -> list:
         except Exception:
             pass
 
-    # ── Estrategia 1: ROT completo, probar cada objeto ────────────────────
+    # Estrategia 1: ROT completo
     try:
         rot = pythoncom.GetRunningObjectTable()
         for moniker in rot.EnumRunning():
@@ -51,15 +48,14 @@ def get_all_open_documents() -> list:
                 raw  = rot.GetObject(moniker)
                 disp = raw.QueryInterface(pythoncom.IID_IDispatch)
                 app  = win32com.client.Dispatch(disp)
-                # Si tiene Documents.Count es AutoCAD
-                _ = app.Documents.Count
+                _    = app.Documents.Count
                 _harvest_app(app)
             except Exception:
                 pass
     except Exception:
         pass
 
-    # ── Estrategia 2: GetActiveObject como fallback ───────────────────────
+    # Estrategia 2: GetActiveObject fallback
     try:
         app = win32com.client.GetActiveObject("AutoCAD.Application")
         _harvest_app(app)
@@ -70,7 +66,6 @@ def get_all_open_documents() -> list:
 
 
 def get_active_file_info() -> dict:
-    """Devuelve el primer documento encontrado (para compatibilidad)."""
     docs = get_all_open_documents()
     if docs:
         return {"name": docs[0]["name"], "path": docs[0]["path"], "ok": True}
@@ -109,7 +104,7 @@ def _do_offset(entity, distance):
 
 
 def _offset_entity(entity, distance):
-    """Offset inward: detecta dirección correcta comparando tamaños."""
+    """Offset inward: compara tamaños para detectar la dirección correcta."""
     src_diag = _bbox_diagonal(entity)
     for sign in (-1, 1):
         try:
@@ -141,104 +136,17 @@ def _apply_layer_color(entities, layer_name, color):
             pass
 
 
-# ── Geometría de entidades ────────────────────────────────────────────────────
-
-def _get_entity_coords(entity):
-    """Lee coordenadas y bulges de una entidad LWPOLYLINE."""
-    coords = list(entity.Coordinates)
-    pts = [(coords[i], coords[i+1]) for i in range(0, len(coords)-1, 2)]
-    bulges = []
-    for i in range(len(pts)):
-        try:
-            bulges.append(float(entity.Bulge(i)))
-        except Exception:
-            bulges.append(0.0)
+def _layer_match(entity, layer_name):
     try:
-        closed = bool(entity.Closed)
+        return entity.Layer.upper() == layer_name.upper()
     except Exception:
-        closed = True
-    return pts, bulges, closed
+        return False
 
 
-def _get_bbox_center(entities):
-    """Calcula el centro del bounding box de un conjunto de entidades."""
-    min_x = min_y = float('inf')
-    max_x = max_y = float('-inf')
-    for e in entities:
-        try:
-            mn, mx = e.GetBoundingBox()
-            min_x = min(min_x, mn[0]); max_x = max(max_x, mx[0])
-            min_y = min(min_y, mn[1]); max_y = max(max_y, mx[1])
-        except Exception:
-            pass
-    return (min_x + max_x) / 2, (min_y + max_y) / 2
-
-
-def _mirror_pts(pts, cx):
-    """Refleja puntos horizontalmente sobre x = cx."""
-    return [(2*cx - x, y) for x, y in pts]
-
-
-def _write_lwpolyline(msp, pts, bulges, closed, layer, color):
-    """Escribe una LWPOLYLINE en el modelspace dado."""
-    flat = []
-    for x, y in pts:
-        flat.extend([float(x), float(y)])
-    coords_var = win32com.client.VARIANT(
-        pythoncom.VT_ARRAY | pythoncom.VT_R8, flat
-    )
-    pline = msp.AddLightWeightPolyline(coords_var)
-    pline.Closed = closed
-    pline.Layer = layer
-    pline.color = color
-    # Aplicar bulges (mirror invierte el signo)
-    for i, b in enumerate(bulges):
-        try:
-            pline.SetBulge(i, b)
-        except Exception:
-            pass
-    return pline
-
-
-# ── Crear archivo PC separado (mirrored) ──────────────────────────────────────
-
-def _create_pc_file(acad, pc_groups, save_path):
-    """
-    pc_groups: lista de (layer_name, color, [entities])
-    Crea un DWG nuevo con esas entidades reflejadas horizontalmente.
-    """
-    new_doc = acad.Documents.Add()
-    new_msp = new_doc.ModelSpace
-
-    # Recoger todas las entidades para calcular centro
-    all_entities = [e for _, _, ents in pc_groups for e in ents]
-    cx, _ = _get_bbox_center(all_entities)
-
-    for layer_name, color, entities in pc_groups:
-        _ensure_layer(new_doc, layer_name, color)
-        for src in entities:
-            try:
-                etype = src.EntityName.upper()
-                if "POLYLINE" in etype:
-                    pts, bulges, closed = _get_entity_coords(src)
-                    # Mirror X + invertir signo de bulges
-                    m_pts = _mirror_pts(pts, cx)
-                    m_bulges = [-b for b in bulges]
-                    _write_lwpolyline(new_msp, m_pts, m_bulges, closed, layer_name, color)
-            except Exception:
-                pass
-
-    new_doc.SaveAs(str(save_path))
-    new_doc.Close(False)
-
-
-# ── Función principal ─────────────────────────────────────────────────────────
+# ── Obtener doc vivo (evita referencias COM expiradas) ───────────────────────
 
 def _get_live_doc(acad_doc: dict):
-    """
-    Re-obtiene el documento vivo desde AutoCAD usando la ruta guardada.
-    Evita usar objetos COM cacheados que pueden expirar.
-    """
+    """Re-obtiene el documento vivo desde AutoCAD usando la ruta guardada."""
     pythoncom.CoInitialize()
     target_path = acad_doc.get("path", "")
     target_name = acad_doc.get("name", "")
@@ -254,7 +162,136 @@ def _get_live_doc(acad_doc: dict):
     )
 
 
-def process_dxf(_dxf_path=None, has_tecoflex=False, tipo="PC", num_pc=1,
+# ── Crear archivo PC separado ─────────────────────────────────────────────────
+
+def _mirror_entities_in_msp(msp, pc_layers_upper):
+    """
+    Hace espejo (Mirror) de todas las entidades PC al lado derecho.
+    El eje de simetría queda a GAP/2 a la derecha del bounding box.
+    """
+    # Recolectar entidades PC
+    pc_entities = []
+    for entity in msp:
+        try:
+            if entity.Layer.upper() in pc_layers_upper:
+                pc_entities.append(entity)
+        except Exception:
+            pass
+
+    if not pc_entities:
+        return
+
+    # Bounding box del conjunto
+    min_x = min_y =  1e18
+    max_x = max_y = -1e18
+    for e in pc_entities:
+        try:
+            mn, mx = e.GetBoundingBox()
+            min_x = min(min_x, mn[0]); max_x = max(max_x, mx[0])
+            min_y = min(min_y, mn[1]); max_y = max(max_y, mx[1])
+        except Exception:
+            pass
+
+    GAP = 20.0
+    mirror_x = max_x + GAP / 2   # eje vertical a la derecha con separación GAP
+
+    p1 = win32com.client.VARIANT(
+        pythoncom.VT_ARRAY | pythoncom.VT_R8,
+        [mirror_x, min_y - 1e6, 0.0]
+    )
+    p2 = win32com.client.VARIANT(
+        pythoncom.VT_ARRAY | pythoncom.VT_R8,
+        [mirror_x, max_y + 1e6, 0.0]
+    )
+
+    for e in list(pc_entities):
+        try:
+            mirrored = e.Mirror(p1, p2)   # crea copia, original queda intacto
+            mirrored.Layer = e.Layer
+            mirrored.color = e.color
+        except Exception:
+            pass
+
+
+def _create_pc_file(acad, original_path, pc_layer_names, save_path):
+    """
+    Crea el archivo PC con Mirror.
+
+    Flujo (sin doble SaveAs — ese era el problema):
+    1.  shutil.copy2(original_path → save_path)   copia a nivel de SO, sin COM
+    2.  acad.Documents.Open(save_path)             abre la copia
+    3.  Borrar entidades no-PC
+    4.  Mirror de entidades PC al lado derecho
+    5.  acad.ActiveDocument.Save()                 guarda en su propio path
+    6.  acad.ActiveDocument.Close(False)
+    El original nunca se cierra, no hay que reabrirlo.
+    """
+    import os
+    import shutil
+    pythoncom.CoInitialize()
+
+    pc_layers_upper   = {n.upper() for n in pc_layer_names}
+    save_path_str     = str(save_path).replace("/", "\\")
+    original_path_str = str(original_path).replace("/", "\\")
+
+    # ── 1. Copiar DWG ya guardado (solo lectura del original) ─────────────
+    if os.path.exists(save_path_str):
+        try:
+            os.remove(save_path_str)
+        except Exception:
+            pass
+    try:
+        shutil.copy2(original_path_str, save_path_str)
+    except Exception as ex:
+        raise RuntimeError(f"Paso 1 (copiar DWG): {ex}")
+
+    # ── 2. Abrir la copia en AutoCAD ──────────────────────────────────────
+    try:
+        copy_doc = acad.Documents.Open(save_path_str)
+    except Exception as ex:
+        raise RuntimeError(f"Paso 2 (abrir copia): {ex}")
+
+    try:
+        copy_doc.Activate()
+    except Exception:
+        pass
+
+    copy_msp = acad.ActiveDocument.ModelSpace
+
+    # ── 3. Borrar entidades que NO son PC ─────────────────────────────────
+    to_delete = []
+    for entity in copy_msp:
+        try:
+            if entity.Layer.upper() not in pc_layers_upper:
+                to_delete.append(entity)
+        except Exception:
+            pass
+    for e in to_delete:
+        try:
+            e.Delete()
+        except Exception:
+            pass
+
+    # ── 4. Mirror ─────────────────────────────────────────────────────────
+    copy_msp = acad.ActiveDocument.ModelSpace  # refrescar tras borrados
+    _mirror_entities_in_msp(copy_msp, pc_layers_upper)
+
+    # ── 5. Guardar (Save, no SaveAs — ya está en el path correcto) ─────────
+    try:
+        acad.ActiveDocument.Save()
+    except Exception as ex:
+        raise RuntimeError(f"Paso 5 (Save PC): {ex}")
+
+    # ── 6. Cerrar (el original sigue abierto, no hay que reabrirlo) ───────
+    try:
+        acad.ActiveDocument.Close(False)
+    except Exception:
+        pass
+
+
+# ── Función principal ─────────────────────────────────────────────────────────
+
+def process_dxf(has_tecoflex=False, tipo="PC", num_pc=1,
                 save_folder=None, save_name=None, acad_doc=None) -> dict:
     """Procesa el documento de AutoCAD especificado usando Offset nativo."""
     pythoncom.CoInitialize()
@@ -266,21 +303,26 @@ def process_dxf(_dxf_path=None, has_tecoflex=False, tipo="PC", num_pc=1,
             raise RuntimeError("No se encontró AutoCAD abierto.")
         acad, doc = docs[0]["app"], docs[0]["doc"]
 
+    # La ruta autoritativa es la que el usuario seleccionó en la UI.
+    # Esto corrige el bug de "guardado como tmpXXX" cuando una corrida anterior
+    # dejó el doc apuntando a un archivo temporal.
+    if acad_doc is not None:
+        original_path = str(acad_doc.get("path", doc.FullName))
+    else:
+        original_path = str(doc.FullName)
+
     msp = doc.ModelSpace
 
     # Buscar PERIMETRO
-    perimetro_entities = [
-        e for e in msp
-        if _layer_match(e, "PERIMETRO")
-    ]
+    perimetro_entities = [e for e in msp if _layer_match(e, "PERIMETRO")]
     if not perimetro_entities:
         raise ValueError(
             "No se encontró el layer 'PERIMETRO' en el archivo.\n"
             "Verifica que el layer se llame exactamente 'PERIMETRO'."
         )
 
-    warnings = []
-    pc_output = None
+    warnings      = []
+    pc_output     = None
     pc_source_entities = perimetro_entities
 
     # ── TECOFLEX ──────────────────────────────────────────────────────────────
@@ -300,8 +342,7 @@ def process_dxf(_dxf_path=None, has_tecoflex=False, tipo="PC", num_pc=1,
             warnings.append("TECOFLEX (-3 mm) no produjo resultado.")
 
     # ── PC ────────────────────────────────────────────────────────────────────
-    has_pc = tipo in ("PC", "PC_AL")
-    # pc_groups: [(layer_name, color, [entities]), ...]
+    has_pc   = tipo in ("PC", "PC_AL")
     pc_groups = []
 
     if has_pc:
@@ -324,34 +365,28 @@ def process_dxf(_dxf_path=None, has_tecoflex=False, tipo="PC", num_pc=1,
             else:
                 warnings.append(f"{layer_name} ({abs(dist)} mm) no produjo resultado.")
 
-        # PC_AL → archivo separado con layers PC_1/PC_2 mirrored
-        if tipo == "PC_AL" and pc_groups and save_folder and save_name:
-            fname = save_name if save_name.lower().endswith(".dwg") else save_name + ".dwg"
-            pc_output = str(Path(save_folder) / fname)
-            try:
-                _create_pc_file(acad, pc_groups, pc_output)
-            except Exception as ex:
-                warnings.append(f"No se pudo crear el archivo PC: {ex}")
-                pc_output = None
-
-    # Guardar archivo principal en su lugar
+    # ── Guardar archivo principal ─────────────────────────────────────────────
+    # Usamos SaveAs con la ruta original para corregir cualquier desviación.
     try:
-        doc.Save()
-    except Exception:
+        doc.SaveAs(str(original_path))
+        main_output = original_path
+    except Exception as ex:
+        warnings.append(f"No se pudo guardar el archivo principal: {ex}")
+        main_output = str(doc.FullName)
+
+    # ── Crear archivo PC (solo PC_AL) ─────────────────────────────────────────
+    if has_pc and tipo == "PC_AL" and pc_groups and save_folder and save_name:
+        fname     = save_name if save_name.lower().endswith(".dwg") else save_name + ".dwg"
+        pc_output = str(Path(save_folder) / fname)
         try:
-            doc.SaveAs(doc.FullName)
+            pc_layer_names = [name for name, _, _ in pc_groups]
+            _create_pc_file(acad, original_path, pc_layer_names, pc_output)
         except Exception as ex:
-            warnings.append(f"No se pudo guardar el archivo principal: {ex}")
+            warnings.append(f"No se pudo crear el archivo PC: {ex}")
+            pc_output = None
 
     return {
-        "main_output": doc.FullName,
-        "pc_output": pc_output,
-        "warnings": warnings,
+        "main_output": main_output,
+        "pc_output":   pc_output,
+        "warnings":    warnings,
     }
-
-
-def _layer_match(entity, layer_name):
-    try:
-        return entity.Layer.upper() == layer_name.upper()
-    except Exception:
-        return False
