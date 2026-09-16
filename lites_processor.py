@@ -25,12 +25,18 @@ original):
     3. Por cada lite: se busca la compensación en la tabla
        (compensacion.py) y se hace un offset hacia AFUERA desde esa
        fuente común -> layer RESULTADO_<posicion>.
-    4. Se guarda el archivo principal (SaveAs, como siempre).
-    5. Se genera un DWG independiente por lite (copia del original,
-       dejando solo PERIMETRO + TECOFLEX + el RESULTADO de ese lite) y
-       un DWG comparativo (copia con una fila de piezas: el original +
-       el resultado de cada lite, una al lado de otra con su etiqueta
-       de posición, para revisar visualmente que compensó bien).
+    4. Si se eligió PC: por cada PC (1..n) un offset independiente hacia
+       adentro desde la fuente común -> layers PC_1..PC_n (PC_1 =
+       cantidad_pc+3 mm, bajando de a 1 hasta 4 en el último).
+    5. TAPA (siempre que se eligió PC o AL, AL requiere TECOFLEX):
+       pieza pequeña -> 2mm hacia adentro de la fuente común; pieza
+       grande/mediana -> si tiene TECOFLEX, el PERIMETRO original tal
+       cual; si no, 1mm hacia afuera del PERIMETRO.
+    6. Se guarda el archivo principal (SaveAs, como siempre).
+    7. Se genera un DWG independiente por lite, uno para PC (con todos
+       los PC_1..PC_n + TAPA), uno para TAPA sola, y un DWG comparativo
+       (fila de piezas: el original + el resultado de cada lite, con
+       etiqueta de posición, para revisar visualmente que compensó bien).
 """
 import os
 import shutil
@@ -54,6 +60,8 @@ from dxf_processor import (
 import compensacion
 
 COLOR_RESULTADO = 3   # verde — layer RESULTADO_<posicion>
+COLOR_PC_BASE = 4      # cian — layer PC_<n> (se corre +1 por cada PC adicional)
+COLOR_TAPA = 6          # magenta — layer TAPA
 GAP_COMPARATIVO = 50.0  # separación (mm) entre piezas en el archivo comparativo
 
 
@@ -100,6 +108,49 @@ def _offset_outward(entity, distance):
         f"No se pudo calcular el offset hacia afuera ({distance} mm).\n"
         "Verifica que la polilínea sea válida."
     )
+
+
+def _traducir_error_guardado(ex) -> str:
+    """AutoCAD casi siempre devuelve el MISMO error genérico de COM al
+    fallar un guardado ('Error saving the document'), sin decir la causa
+    real. En vez de mostrar solo el código crudo, se listan las causas
+    más comunes para que el usuario las descarte una por una."""
+    return (
+        "AutoCAD no pudo guardar el archivo. Causas mas comunes a revisar:\n"
+        "  1. Que el archivo NO este en modo solo lectura (clic derecho -> Propiedades).\n"
+        "  2. Que tengas permisos de escritura en esa carpeta (ojo si es una carpeta de red).\n"
+        "  3. Que nadie mas tenga el archivo abierto al mismo tiempo.\n"
+        "  4. Que haya espacio suficiente en el disco/servidor.\n"
+        f"Detalle tecnico de AutoCAD: {ex}"
+    )
+
+
+def _verificar_carpeta_escribible(ruta: str, etiqueta: str, es_carpeta: bool = False):
+    """Prueba a escribir un archivo temporal en la carpeta antes de
+    tocar AutoCAD — así, si no hay permisos, se corta de una en vez de
+    ofsetear todo el dibujo y recién ahí descubrir que no se puede
+    guardar nada.
+
+    es_carpeta=True: `ruta` YA es la carpeta a validar (ej. carpeta de
+    destino elegida por el usuario). es_carpeta=False: `ruta` es un
+    archivo, se valida la carpeta que lo contiene (ej. el DWG original)."""
+    carpeta = ruta if es_carpeta else os.path.dirname(ruta)
+    if not carpeta or not os.path.isdir(carpeta):
+        raise RuntimeError(f"{etiqueta}: la carpeta '{carpeta}' no existe o no es accesible.")
+    prueba = os.path.join(carpeta, f".piezasplanas_test_{os.getpid()}.tmp")
+    try:
+        with open(prueba, "w") as f:
+            f.write("test")
+    except Exception as ex:
+        raise RuntimeError(
+            f"{etiqueta}: no tienes permisos de escritura en '{carpeta}'. "
+            f"Revísalo antes de procesar (detalle: {ex})."
+        )
+    finally:
+        try:
+            os.remove(prueba)
+        except Exception:
+            pass
 
 
 def _limpiar_layer(msp, nombre_layer):
@@ -155,23 +206,66 @@ def _perimetro_unico(msp):
 # ── Proceso principal ─────────────────────────────────────────────────────
 
 def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
-                    nombre_general: str, carpeta_destino: str) -> dict:
+                    nombre_general: str, carpeta_destino: str,
+                    pieza_grande: bool = False, modo_accesorio: str = None,
+                    cantidad_pc: int = 0) -> dict:
     """
     lites: lista de dicts, uno por lite (posición 100, 200, 300...):
         {"posicion": 100, "tipo_cristal": "SODALIME_WHITE", "espesor": 8,
-         "pintura": bool, "caja": bool, "pieza_grande": bool}
+         "pintura": bool, "caja": bool}
+        (pieza_grande ya NO va por lite — es una sola respuesta global,
+        igual que tiene_tecoflex, y aplica para todos los lites y para
+        la TAPA.)
 
-    Todos los lites se calculan a partir del MISMO PERIMETRO original
-    (o su TECOFLEX), nunca uno a partir de otro.
+    pieza_grande: True = grande/mediana, False = pequeña. Define tanto
+        la compensación de cada lite (tabla) como la lógica de la TAPA.
+
+    modo_accesorio: None (no aplica), "PC" o "AL".
+        - "PC": se generan `cantidad_pc` layers PC_1..PC_n con offset
+          hacia adentro desde PERIMETRO/TECOFLEX (PC_1 = cantidad_pc+3,
+          bajando de a 1 hasta 4 en el último), cada uno independiente
+          (nunca encadenado), + un archivo PC aparte con todos esos
+          layers + TAPA.
+        - "AL": no genera layers PC, solo TAPA. Requiere tiene_tecoflex
+          (una pieza sin TECOFLEX no puede ir en AL).
+        Ambos casos generan siempre el archivo TAPA.
+
+    Todos los lites (y PC/TAPA) se calculan a partir del MISMO PERIMETRO
+    original (o su TECOFLEX), nunca uno a partir de otro.
 
     Devuelve:
         {"main_output", "archivos_lites", "comparativo_output",
-         "detalle", "warnings"}
+         "archivo_pc", "archivo_tapa", "detalle", "warnings"}
     """
+    if modo_accesorio == "AL" and not tiene_tecoflex:
+        raise ValueError(
+            "AL solo aplica si la pieza tiene TECOFLEX — lo que no "
+            "tiene TECOFLEX no tiene AL, bro. Revisa esa respuesta."
+        )
+    if modo_accesorio == "PC" and (not isinstance(cantidad_pc, int) or cantidad_pc < 1):
+        raise ValueError("La cantidad de PC debe ser un número entero de 1 para arriba.")
+
     pythoncom.CoInitialize()
     acad, doc = _get_live_doc(acad_doc)
     original_path = str(acad_doc.get("path", doc.FullName))
     msp = doc.ModelSpace
+
+    # Si el dibujo nunca se ha guardado en disco (ej. "Drawing1.dwg" recién
+    # creado), AutoCAD no le da una ruta real — mejor decirlo claro que
+    # dejar que la validación de carpeta de abajo tire un error críptico
+    # de "la carpeta '' no existe".
+    if not os.path.isabs(original_path):
+        raise RuntimeError(
+            "El archivo abierto en AutoCAD todavía no se ha guardado en disco "
+            f"(aparece como '{original_path}', sin carpeta real). Guárdalo "
+            "primero en AutoCAD (Ctrl+S) eligiendo dónde y con qué nombre, y "
+            "vuelve a intentar."
+        )
+
+    # Verificar permisos ANTES de tocar el dibujo — si esto va a fallar,
+    # mejor saberlo ya que ofsetear todo y descubrirlo al final.
+    _verificar_carpeta_escribible(original_path, "Archivo principal", es_carpeta=False)
+    _verificar_carpeta_escribible(carpeta_destino, "Carpeta de destino", es_carpeta=True)
 
     perimetro = _perimetro_unico(msp)
     mn, mx = perimetro.GetBoundingBox()
@@ -200,7 +294,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
         try:
             comp = compensacion.obtener_compensacion(
                 cfg["tipo_cristal"], cfg["espesor"],
-                cfg["pintura"], cfg["caja"], cfg["pieza_grande"],
+                cfg["pintura"], cfg["caja"], pieza_grande,
             )
         except ValueError as ex:
             raise ValueError(f"Lite {pos}: {ex}")
@@ -232,13 +326,54 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
             "aplica": comp["aplica"],
         })
 
+    # ── PC (layers PC_1..PC_n, cada uno independiente desde fuente_comun) ──
+    layers_pc = []
+    if modo_accesorio == "PC":
+        # PC_1 = cantidad_pc+3, bajando de a 1 hasta 4 en el último.
+        offsets_pc = list(range(cantidad_pc + 3, 3, -1))
+        for i, dist in enumerate(offsets_pc, start=1):
+            layer_pc = f"PC_{i}"
+            color = min(COLOR_PC_BASE + (i - 1), 255)
+            _ensure_layer(doc, layer_pc, color)
+            _limpiar_layer(msp, layer_pc)
+            try:
+                resultado_pc = _offset_entity(fuente_comun, -abs(dist))
+            except Exception as ex:
+                raise RuntimeError(f"PC_{i} (offset {dist}mm) falló: {ex}")
+            _apply_layer_color(resultado_pc, layer_pc, color)
+            layers_pc.append(layer_pc)
+
+    # ── TAPA (siempre que se eligió PC o AL) ──────────────────────────────
+    layer_tapa = None
+    if modo_accesorio in ("PC", "AL"):
+        layer_tapa = "TAPA"
+        _ensure_layer(doc, layer_tapa, COLOR_TAPA)
+        _limpiar_layer(msp, layer_tapa)
+        if pieza_grande:
+            if tiene_tecoflex:
+                # Grande/mediana + tecoflex -> la tapa es el PERIMETRO original, sin tocar.
+                tapa_ents = [perimetro.Copy()]
+            else:
+                # Grande/mediana + sin tecoflex -> 1mm hacia afuera del PERIMETRO.
+                tapa_ents = _offset_outward(perimetro, 1.0)
+        else:
+            # Pequeña -> 2mm hacia adentro de la fuente común (tecoflex o perimetro).
+            try:
+                tapa_ents = _offset_entity(fuente_comun, -2.0)
+            except Exception as ex:
+                raise RuntimeError(f"TAPA (offset 2mm) falló: {ex}")
+        _apply_layer_color(tapa_ents, layer_tapa, COLOR_TAPA)
+
     # ── Guardar archivo principal (todo junto, como hoy) ─────────────────
+    # Si esto falla, se corta TODO el proceso acá mismo: generar los
+    # archivos de lite/PC/TAPA/comparativo a partir de un archivo que
+    # nunca se guardó bien solo producía una cascada de errores confusos
+    # más adelante (WinError 2 al copiar un archivo mal escrito).
     try:
         _retry_com(lambda: doc.SaveAs(str(original_path)))
-        main_output = original_path
     except Exception as ex:
-        warnings.append(f"No se pudo guardar el archivo principal: {ex}")
-        main_output = str(doc.FullName)
+        raise RuntimeError(_traducir_error_guardado(ex))
+    main_output = original_path
 
     # ── Archivos independientes por lite ──────────────────────────────────
     archivos_lites = []
@@ -264,10 +399,35 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
     except Exception as ex:
         warnings.append(f"No se pudo crear el archivo comparativo: {ex}")
 
+    # ── Archivo PC (todos los layers PC_1..PC_n + TAPA) ───────────────────
+    archivo_pc = None
+    if modo_accesorio == "PC":
+        try:
+            fname = f"{nombre_general}_PC.dwg"
+            destino = str(Path(carpeta_destino) / fname)
+            layers_conservar = set(layers_pc) | ({layer_tapa} if layer_tapa else set())
+            _guardar_por_layers(acad, original_path, destino, layers_conservar)
+            archivo_pc = destino
+        except Exception as ex:
+            warnings.append(f"No se pudo crear el archivo PC: {ex}")
+
+    # ── Archivo TAPA (solo el layer TAPA) ──────────────────────────────────
+    archivo_tapa = None
+    if layer_tapa:
+        try:
+            fname = f"{nombre_general}_TAPA.dwg"
+            destino = str(Path(carpeta_destino) / fname)
+            _guardar_por_layers(acad, original_path, destino, {layer_tapa})
+            archivo_tapa = destino
+        except Exception as ex:
+            warnings.append(f"No se pudo crear el archivo TAPA: {ex}")
+
     return {
         "main_output": main_output,
         "archivos_lites": archivos_lites,
         "comparativo_output": comparativo_output,
+        "archivo_pc": archivo_pc,
+        "archivo_tapa": archivo_tapa,
         "detalle": detalle,
         "warnings": warnings,
     }
@@ -306,6 +466,35 @@ def _guardar_lite_independiente(acad, original_path, destino, info):
     msp = acad.ActiveDocument.ModelSpace
 
     layers_conservar = {"PERIMETRO", "TECOFLEX", info["layer_resultado"].upper()}
+
+    to_delete = []
+    for e in msp:
+        try:
+            layer = e.Layer.upper()
+        except Exception:
+            to_delete.append(e)
+            continue
+        if layer not in layers_conservar:
+            to_delete.append(e)
+
+    for e in to_delete:
+        try:
+            e.Delete()
+        except Exception:
+            pass
+
+    _retry_com(lambda: acad.ActiveDocument.Save())
+    _retry_com(lambda: acad.ActiveDocument.Close(False))
+
+
+def _guardar_por_layers(acad, original_path, destino, layers_extra):
+    """Copia el DWG original y deja solo PERIMETRO + TECOFLEX (si existe)
+    + los layers extra indicados (ej. PC_1, PC_2, TAPA). Borra el resto.
+    Mismo patrón que _guardar_lite_independiente, genérico para PC/TAPA."""
+    _abrir_copia(acad, original_path, destino)
+    msp = acad.ActiveDocument.ModelSpace
+
+    layers_conservar = {"PERIMETRO", "TECOFLEX"} | {n.upper() for n in layers_extra}
 
     to_delete = []
     for e in msp:

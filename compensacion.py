@@ -18,6 +18,11 @@ import random
 
 SODALIME_WHITE = "SODALIME_WHITE"
 ALUMINUM = "ALUMINUM"
+OTROS = "OTROS"
+
+# "Otros" no usa tabla: siempre 2.5mm hacia afuera, no pregunta
+# espesor/pintura/caja.
+OTROS_VALOR_MM = 2.5
 
 # Grupos de espesor -> valores de compensación (mm) por escenario.
 # sin_caja=None significa "N/A (matado de filos)": no aplica offset de compensación.
@@ -82,7 +87,7 @@ def obtener_compensacion(tipo_cristal: str, espesor: float,
     Busca la compensación (mm) a offsetear hacia afuera, según la tabla.
 
     Devuelve {"valor": float, "aplica": bool}.
-      - aplica=True  -> valor es el offset a aplicar.
+      - aplica=True  -> valor es el offset a aplicar hacia afuera.
       - aplica=False -> caso N/A (matado de filos): no hay nada que
         offsetear, solo queda el offset base de 3mm. No es un error del
         usuario, es un resultado válido de la tabla.
@@ -92,8 +97,12 @@ def obtener_compensacion(tipo_cristal: str, espesor: float,
 
     Nota: pieza_grande manda su propia tabla (un solo valor por espesor,
     sin importar pintura/caja), pero pintura/caja igual se preguntan al
-    usuario para dejar el dato registrado.
+    usuario para dejar el dato registrado. OTROS no usa tabla ni pregunta
+    nada de eso: siempre 2.5mm hacia afuera, punto.
     """
+    if tipo_cristal == OTROS:
+        return {"valor": OTROS_VALOR_MM, "aplica": True}
+
     if pieza_grande:
         grupo = _buscar_grupo(_TABLA_PIEZA_GRANDE, tipo_cristal, espesor)
         return {"valor": grupo["valor"], "aplica": True}

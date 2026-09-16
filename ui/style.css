@@ -276,6 +276,9 @@ body {
 .doc-card-path { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .doc-card-check { font-size: 15px; color: var(--accent); opacity: 0; transition: opacity 0.15s; }
 .doc-card.selected .doc-card-check { opacity: 1; }
+.doc-card-disabled { cursor: not-allowed; opacity: 0.7; }
+.doc-card-disabled:hover { transform: none; border-color: var(--border); background: var(--bg-page); }
+.doc-card-disabled .doc-card-path { color: var(--danger); font-weight: 600; white-space: normal; }
 
 /* ── Choice buttons (tecoflex) ───────────────────────────────────── */
 
@@ -297,6 +300,14 @@ body {
 .choice-yes .choice-icon { background: var(--ok-bg); color: var(--ok); }
 .choice-no:hover { border-color: var(--danger); background: var(--danger-bg); }
 .choice-no .choice-icon { background: var(--danger-bg); color: var(--danger); }
+.choice-btn.selected {
+  border-color: var(--accent); background: rgba(46, 134, 193, 0.08);
+  box-shadow: 0 6px 18px -10px rgba(46, 134, 193, 0.5);
+}
+.choice-btn.choice-disabled {
+  opacity: 0.4; cursor: not-allowed; filter: grayscale(0.6);
+}
+.choice-btn.choice-disabled:hover { transform: none; border-color: var(--border); background: var(--bg-page); }
 
 /* ── Form fields ─────────────────────────────────────────────────── */
 
@@ -375,6 +386,7 @@ body {
 }
 .toggle input:checked + .toggle-slider { background: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+.toggle input:disabled + .toggle-slider { opacity: 0.35; cursor: not-allowed; }
 
 .comp-cell { font-weight: 700; white-space: nowrap; }
 .comp-cell.comp-ok { color: var(--ok); }

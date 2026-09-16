@@ -17,6 +17,7 @@ from lites_processor import procesar_lites
 TIPOS_CRISTAL = [
     {"id": "SODALIME_WHITE", "label": "Sodalime / White"},
     {"id": "ALUMINUM", "label": "Aluminum"},
+    {"id": "OTROS", "label": "Otros"},
 ]
 
 
@@ -31,7 +32,10 @@ class Api:
             return {"ok": False, "error": str(ex), "documentos": []}
         return {
             "ok": True,
-            "documentos": [{"name": d["name"], "path": d["path"]} for d in docs],
+            "documentos": [
+                {"name": d["name"], "path": d["path"], "guardado": os.path.isabs(d["path"])}
+                for d in docs
+            ],
         }
 
     # ── Datos de referencia para la tabla de lites ──────────────────────
@@ -80,8 +84,11 @@ class Api:
             {
               "documento": {"name": ..., "path": ...},
               "tiene_tecoflex": bool,
+              "pieza_grande": bool,          # global, una sola respuesta (como tecoflex)
+              "modo_accesorio": "PC"|"AL"|None,
+              "cantidad_pc": int,             # solo si modo_accesorio == "PC"
               "lites": [{"posicion":100,"tipo_cristal":...,"espesor":...,
-                         "pintura":bool,"caja":bool,"pieza_grande":bool}, ...],
+                         "pintura":bool,"caja":bool}, ...],
               "nombre_general": "PIEZA",
               "carpeta_destino": "C:/..."
             }
@@ -93,6 +100,9 @@ class Api:
                 lites=payload["lites"],
                 nombre_general=payload["nombre_general"],
                 carpeta_destino=payload["carpeta_destino"],
+                pieza_grande=bool(payload.get("pieza_grande")),
+                modo_accesorio=payload.get("modo_accesorio"),
+                cantidad_pc=int(payload.get("cantidad_pc") or 0),
             )
             return {"ok": True, **resultado}
         except Exception as ex:

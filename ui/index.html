@@ -46,9 +46,13 @@
       <div class="step-line"></div>
       <div class="step-dot" data-dot="tecoflex"><span class="dot-num">2</span><label>Tecoflex</label></div>
       <div class="step-line"></div>
-      <div class="step-dot" data-dot="datos"><span class="dot-num">3</span><label>Datos</label></div>
+      <div class="step-dot" data-dot="tamano"><span class="dot-num">3</span><label>Tamaño</label></div>
       <div class="step-line"></div>
-      <div class="step-dot" data-dot="tabla"><span class="dot-num">4</span><label>Lites</label></div>
+      <div class="step-dot" data-dot="datos"><span class="dot-num">4</span><label>Datos</label></div>
+      <div class="step-line"></div>
+      <div class="step-dot" data-dot="tabla"><span class="dot-num">5</span><label>Lites</label></div>
+      <div class="step-line"></div>
+      <div class="step-dot" data-dot="accesorio"><span class="dot-num">6</span><label>PC / AL</label></div>
     </div>
 
     <button class="btn-back" id="btn-back">&larr; Atrás</button>
@@ -90,6 +94,26 @@
             <button class="choice-btn choice-no" id="btn-teco-no">
               <span class="choice-icon">&#10005;</span>
               <span class="choice-label">No tiene</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Paso: tamaño de la pieza (global, como tecoflex) -->
+      <section class="step" data-step="tamano">
+        <div class="card card-hero card-center">
+          <h2>¿La pieza es grande/mediana o pequeña?</h2>
+          <p class="sub">Aplica para todos los lites (la tabla de compensación cambia según esto) y también
+             para la TAPA más adelante si eliges PC o AL.</p>
+
+          <div class="choice-row">
+            <button class="choice-btn choice-yes" id="btn-tamano-grande">
+              <span class="choice-icon">&#9679;</span>
+              <span class="choice-label">Grande / mediana</span>
+            </button>
+            <button class="choice-btn choice-no" id="btn-tamano-pequena">
+              <span class="choice-icon">&#9675;</span>
+              <span class="choice-label">Pequeña</span>
             </button>
           </div>
         </div>
@@ -137,12 +161,44 @@
                   <th>Espesor</th>
                   <th>Pintura</th>
                   <th>Caja</th>
-                  <th>Pieza grande</th>
                   <th>Compensación</th>
                 </tr>
               </thead>
               <tbody id="tabla-lites-body"></tbody>
             </table>
+          </div>
+
+          <button class="btn btn-primario btn-block btn-cta" id="btn-tabla-next" disabled>
+            Continuar &rarr;
+          </button>
+        </div>
+      </section>
+
+      <!-- Paso: PC / AL -->
+      <section class="step" data-step="accesorio">
+        <div class="card card-hero">
+          <h2>¿La pieza es PC o AL?</h2>
+          <p class="sub">Esto define qué archivos extra se generan: PC crea los layers PC_1..PC_n + una TAPA.
+             AL solo crea la TAPA (y necesita que la pieza tenga TECOFLEX).</p>
+
+          <div class="choice-row">
+            <button class="choice-btn choice-yes" id="btn-accesorio-pc">
+              <span class="choice-icon">&#128295;</span>
+              <span class="choice-label">PC</span>
+            </button>
+            <button class="choice-btn choice-no" id="btn-accesorio-al">
+              <span class="choice-icon">&#9881;</span>
+              <span class="choice-label">AL</span>
+            </button>
+          </div>
+          <p class="sub hide" id="accesorio-al-bloqueado">
+            Esta pieza no tiene TECOFLEX, así que AL no aplica — lo que no tiene TECOFLEX no tiene AL. Solo PC está disponible.
+          </p>
+
+          <div class="hide" id="accesorio-pc-cantidad">
+            <label class="field-label" for="in-cantidad-pc">Cantidad de PC</label>
+            <input type="number" id="in-cantidad-pc" class="field-input" min="1" step="1" value="1" />
+            <p class="sub">PC_1 lleva el offset más grande, bajando de a 1&nbsp;mm hasta 4&nbsp;mm en el último.</p>
           </div>
 
           <button class="btn btn-primario btn-block btn-cta" id="btn-procesar" disabled>
@@ -182,6 +238,14 @@
               <div class="resultado-row" id="res-comp-row">
                 <span class="resultado-label">Archivo comparativo</span>
                 <span class="resultado-value" id="res-comp"></span>
+              </div>
+              <div class="resultado-row hide" id="res-pc-row">
+                <span class="resultado-label">Archivo PC</span>
+                <span class="resultado-value" id="res-pc"></span>
+              </div>
+              <div class="resultado-row hide" id="res-tapa-row">
+                <span class="resultado-label">Archivo TAPA</span>
+                <span class="resultado-value" id="res-tapa"></span>
               </div>
             </div>
 

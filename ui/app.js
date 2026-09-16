@@ -142,11 +142,14 @@ function impactAt(el, colorRGB) {
 
 // ── Estado del wizard ─────────────────────────────────────────────────
 
-const STEP_ORDER = ["file", "tecoflex", "datos", "tabla"];
+const STEP_ORDER = ["file", "tecoflex", "tamano", "datos", "tabla", "accesorio"];
 
 const state = {
   documento: null,
   tieneTecoflex: null,
+  piezaGrande: null,
+  modoAccesorio: null,   // "PC" | "AL" | null
+  cantidadPc: 1,
   cantidadLites: 1,
   nombreGeneral: "",
   carpetaDestino: "",
@@ -160,15 +163,24 @@ let currentStep = null;
 function resetState() {
   state.documento = null;
   state.tieneTecoflex = null;
+  state.piezaGrande = null;
+  state.modoAccesorio = null;
+  state.cantidadPc = 1;
   state.cantidadLites = 1;
   state.nombreGeneral = "";
   state.carpetaDestino = "";
   state.lites = [];
   document.getElementById("in-cantidad").value = 1;
   document.getElementById("in-nombre").value = "";
+  document.getElementById("in-cantidad-pc").value = 1;
   document.getElementById("folder-box").classList.remove("chosen");
   document.getElementById("folder-text").textContent = "Sin carpeta seleccionada";
   document.getElementById("btn-datos-next").disabled = false;
+  document.querySelectorAll("#btn-tamano-grande, #btn-tamano-pequena, #btn-accesorio-pc, #btn-accesorio-al")
+    .forEach((b) => b.classList.remove("selected"));
+  document.getElementById("accesorio-pc-cantidad").classList.add("hide");
+  document.getElementById("accesorio-al-bloqueado").classList.add("hide");
+  document.getElementById("btn-procesar").disabled = true;
 }
 
 // ── Navegación entre pasos ───────────────────────────────────────────
@@ -261,6 +273,7 @@ async function refreshDocs() {
     const el = document.createElement("button");
     el.type = "button";
     el.className = "doc-card";
+    if (doc.guardado === false) el.classList.add("doc-card-disabled");
     el.innerHTML = `
       <span class="doc-card-icon">&#128196;</span>
       <span class="doc-card-body">
@@ -269,6 +282,13 @@ async function refreshDocs() {
       </span>
       <span class="doc-card-check">&#10003;</span>`;
     el.querySelector(".doc-card-name").textContent = doc.name;
+    if (doc.guardado === false) {
+      el.querySelector(".doc-card-path").textContent =
+        "⚠ Este dibujo no se ha guardado en disco todavía — guárdalo en AutoCAD (Ctrl+S) primero.";
+      el.disabled = true;
+      list.appendChild(el);
+      return;
+    }
     el.querySelector(".doc-card-path").textContent = doc.path;
     el.addEventListener("click", () => {
       docsSeleccionado = doc;
@@ -293,10 +313,23 @@ document.getElementById("btn-file-next").addEventListener("click", (ev) => {
 document.getElementById("btn-teco-si").addEventListener("click", (ev) => {
   state.tieneTecoflex = true;
   impactAt(ev.currentTarget, "30,142,62");
-  goStep("datos", "fwd");
+  goStep("tamano", "fwd");
 });
 document.getElementById("btn-teco-no").addEventListener("click", (ev) => {
   state.tieneTecoflex = false;
+  impactAt(ev.currentTarget, "100,116,139");
+  goStep("tamano", "fwd");
+});
+
+// ── Paso: tamaño (global, aplica a todos los lites y a la TAPA) ──────
+
+document.getElementById("btn-tamano-grande").addEventListener("click", (ev) => {
+  state.piezaGrande = true;
+  impactAt(ev.currentTarget, "30,142,62");
+  goStep("datos", "fwd");
+});
+document.getElementById("btn-tamano-pequena").addEventListener("click", (ev) => {
+  state.piezaGrande = false;
   impactAt(ev.currentTarget, "100,116,139");
   goStep("datos", "fwd");
 });
@@ -352,7 +385,6 @@ function construirLites(cantidad) {
       espesor: "",
       pintura: false,
       caja: false,
-      pieza_grande: false,
       compensacion: { estado: "pending" }, // pending | ok | error
     });
   }
@@ -384,7 +416,6 @@ async function renderTablaLites() {
       <td><select class="sel-espesor" disabled><option value="">—</option></select></td>
       <td><label class="toggle"><input type="checkbox" class="chk-pintura" /><span class="toggle-slider"></span></label></td>
       <td><label class="toggle"><input type="checkbox" class="chk-caja" /><span class="toggle-slider"></span></label></td>
-      <td><label class="toggle"><input type="checkbox" class="chk-grande" /><span class="toggle-slider"></span></label></td>
       <td class="comp-cell comp-pending">—</td>
     `;
     tbody.appendChild(tr);
@@ -393,11 +424,28 @@ async function renderTablaLites() {
     const selEspesor = tr.querySelector(".sel-espesor");
     const chkPintura = tr.querySelector(".chk-pintura");
     const chkCaja = tr.querySelector(".chk-caja");
-    const chkGrande = tr.querySelector(".chk-grande");
 
     selTipo.addEventListener("change", async () => {
       lite.tipo_cristal = selTipo.value;
       lite.espesor = "";
+      lite.pintura = false;
+      lite.caja = false;
+      chkPintura.checked = false;
+      chkCaja.checked = false;
+
+      if (lite.tipo_cristal === "OTROS") {
+        // "Otros" no usa espesor/pintura/caja: siempre 2.5mm hacia afuera.
+        selEspesor.innerHTML = `<option value="">No aplica</option>`;
+        selEspesor.disabled = true;
+        chkPintura.disabled = true;
+        chkCaja.disabled = true;
+        lite.espesor = 0; // dummy: el backend lo ignora para OTROS
+        recalcularFila(lite, tr);
+        return;
+      }
+
+      chkPintura.disabled = false;
+      chkCaja.disabled = false;
       await poblarEspesores(lite, selEspesor);
       recalcularFila(lite, tr);
     });
@@ -409,7 +457,6 @@ async function renderTablaLites() {
 
     chkPintura.addEventListener("change", () => { lite.pintura = chkPintura.checked; recalcularFila(lite, tr); });
     chkCaja.addEventListener("change", () => { lite.caja = chkCaja.checked; recalcularFila(lite, tr); });
-    chkGrande.addEventListener("change", () => { lite.pieza_grande = chkGrande.checked; recalcularFila(lite, tr); });
   });
 
   actualizarBotonProcesar();
@@ -449,7 +496,7 @@ async function recalcularFila(lite, tr) {
 
   const r = await callApi(
     "calcular_compensacion",
-    lite.tipo_cristal, lite.espesor, lite.pintura, lite.caja, lite.pieza_grande
+    lite.tipo_cristal, lite.espesor, lite.pintura, lite.caja, !!state.piezaGrande
   );
 
   if (!r || !r.ok) {
@@ -469,10 +516,75 @@ async function recalcularFila(lite, tr) {
 }
 
 function actualizarBotonProcesar() {
-  const btn = document.getElementById("btn-procesar");
+  const btn = document.getElementById("btn-tabla-next");
   const todasOk = state.lites.length > 0 && state.lites.every((l) => l.compensacion && l.compensacion.estado === "ok");
   btn.disabled = !todasOk;
 }
+
+document.getElementById("btn-tabla-next").addEventListener("click", (ev) => {
+  impactAt(ev.currentTarget, "46,134,193");
+  prepararPasoAccesorio();
+  goStep("accesorio", "fwd");
+});
+
+// ── Paso: PC / AL ─────────────────────────────────────────────────────
+
+function prepararPasoAccesorio() {
+  const btnAl = document.getElementById("btn-accesorio-al");
+  const avisoBloqueado = document.getElementById("accesorio-al-bloqueado");
+  const alDisponible = !!state.tieneTecoflex;
+
+  btnAl.classList.toggle("choice-disabled", !alDisponible);
+  avisoBloqueado.classList.toggle("hide", alDisponible);
+
+  // Si AL había quedado elegido y ahora no aplica (el usuario se devolvió
+  // y cambió tecoflex a "No"), se resetea la elección.
+  if (!alDisponible && state.modoAccesorio === "AL") {
+    state.modoAccesorio = null;
+    document.getElementById("accesorio-pc-cantidad").classList.add("hide");
+    document.querySelectorAll("#btn-accesorio-pc, #btn-accesorio-al").forEach((b) => b.classList.remove("selected"));
+  }
+  actualizarBotonAccesorio();
+}
+
+function actualizarBotonAccesorio() {
+  const btn = document.getElementById("btn-procesar");
+  if (state.modoAccesorio === "PC") {
+    btn.disabled = !(Number.isInteger(state.cantidadPc) && state.cantidadPc >= 1);
+  } else if (state.modoAccesorio === "AL") {
+    btn.disabled = !state.tieneTecoflex;
+  } else {
+    btn.disabled = true;
+  }
+}
+
+document.getElementById("btn-accesorio-pc").addEventListener("click", (ev) => {
+  state.modoAccesorio = "PC";
+  document.querySelectorAll("#btn-accesorio-pc, #btn-accesorio-al").forEach((b) => b.classList.remove("selected"));
+  ev.currentTarget.classList.add("selected");
+  document.getElementById("accesorio-pc-cantidad").classList.remove("hide");
+  impactAt(ev.currentTarget, "46,134,193");
+  actualizarBotonAccesorio();
+});
+
+document.getElementById("btn-accesorio-al").addEventListener("click", (ev) => {
+  if (!state.tieneTecoflex) {
+    impactAt(ev.currentTarget, "217,48,37");
+    return;
+  }
+  state.modoAccesorio = "AL";
+  document.querySelectorAll("#btn-accesorio-pc, #btn-accesorio-al").forEach((b) => b.classList.remove("selected"));
+  ev.currentTarget.classList.add("selected");
+  document.getElementById("accesorio-pc-cantidad").classList.add("hide");
+  impactAt(ev.currentTarget, "46,134,193");
+  actualizarBotonAccesorio();
+});
+
+document.getElementById("in-cantidad-pc").addEventListener("input", (ev) => {
+  const v = parseInt(ev.currentTarget.value, 10);
+  state.cantidadPc = Number.isInteger(v) ? v : NaN;
+  actualizarBotonAccesorio();
+});
 
 // ── Procesar ──────────────────────────────────────────────────────────
 
@@ -510,13 +622,15 @@ document.getElementById("btn-procesar").addEventListener("click", async (ev) => 
   const payload = {
     documento: state.documento,
     tiene_tecoflex: !!state.tieneTecoflex,
+    pieza_grande: !!state.piezaGrande,
+    modo_accesorio: state.modoAccesorio,
+    cantidad_pc: state.modoAccesorio === "PC" ? state.cantidadPc : 0,
     lites: state.lites.map((l) => ({
       posicion: l.posicion,
       tipo_cristal: l.tipo_cristal,
       espesor: l.espesor,
       pintura: l.pintura,
       caja: l.caja,
-      pieza_grande: l.pieza_grande,
     })),
     nombre_general: state.nombreGeneral,
     carpeta_destino: state.carpetaDestino,
@@ -544,6 +658,22 @@ function mostrarResultadoOk(r) {
     document.getElementById("res-comp").textContent = nombreArchivo(r.comparativo_output);
   } else {
     compRow.classList.add("hide");
+  }
+
+  const pcRow = document.getElementById("res-pc-row");
+  if (r.archivo_pc) {
+    pcRow.classList.remove("hide");
+    document.getElementById("res-pc").textContent = nombreArchivo(r.archivo_pc);
+  } else {
+    pcRow.classList.add("hide");
+  }
+
+  const tapaRow = document.getElementById("res-tapa-row");
+  if (r.archivo_tapa) {
+    tapaRow.classList.remove("hide");
+    document.getElementById("res-tapa").textContent = nombreArchivo(r.archivo_tapa);
+  } else {
+    tapaRow.classList.add("hide");
   }
 
   const litesList = document.getElementById("res-lites-list");
@@ -610,7 +740,7 @@ function escapeHtml(s) {
 document.getElementById("btn-abrir-carpeta").addEventListener("click", () => {
   const r = window._resultadoActual;
   if (!r) return;
-  const ruta = r.main_output || (r.archivos_lites && r.archivos_lites[0]) || r.comparativo_output;
+  const ruta = r.main_output || (r.archivos_lites && r.archivos_lites[0]) || r.comparativo_output || r.archivo_pc || r.archivo_tapa;
   if (ruta) callApi("abrir_carpeta", ruta);
 });
 
@@ -621,7 +751,7 @@ document.getElementById("btn-procesar-otro").addEventListener("click", () => {
 });
 
 document.getElementById("btn-error-volver").addEventListener("click", () => {
-  goStep("tabla", "back");
+  goStep("accesorio", "back");
 });
 document.getElementById("btn-error-reset").addEventListener("click", () => {
   resetState();
