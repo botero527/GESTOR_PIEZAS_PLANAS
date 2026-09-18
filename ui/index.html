@@ -290,6 +290,19 @@
     </div>
   </main>
 
+  <!-- Mini-juego easter egg: escribe "pacman" en cualquier momento -->
+  <div id="pacman-overlay" class="pacman-overlay hide">
+    <button class="pacman-close" id="pacman-close" title="Cerrar">&#10005;</button>
+    <div class="pacman-hud">
+      <span class="pacman-hud-item">Puntaje: <span id="pacman-score">0</span></span>
+      <span class="pacman-hud-item">Vidas: <span id="pacman-lives">3</span></span>
+      <span class="pacman-hud-item">Mejor: <span id="pacman-highscore">0</span></span>
+    </div>
+    <canvas id="pacman-canvas"></canvas>
+    <div class="pacman-hint">Flechas / WASD para moverte · Esc o la X para salir</div>
+  </div>
+
+  <script src="pacman.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -477,3 +477,27 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* ── Pac-Man easter egg ──────────────────────────────────────────── */
+
+.pacman-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(244, 247, 250, 0.97);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+}
+.pacman-close {
+  position: absolute; top: 16px; right: 16px;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1.5px solid var(--border); background: var(--bg-panel);
+  color: var(--text-dim); font-size: 14px; cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pacman-close:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+.pacman-hud { display: flex; gap: 22px; font-size: 14px; font-weight: 700; color: var(--accent-dark); }
+.pacman-hud-item span { color: var(--text); }
+#pacman-canvas {
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px -12px rgba(30, 60, 90, 0.3);
+  background: #04070d;
+}
+.pacman-hint { font-size: 11px; color: var(--text-dim); }

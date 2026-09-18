@@ -758,3 +758,39 @@ document.getElementById("btn-error-reset").addEventListener("click", () => {
   goStep("file", "back");
   refreshDocs();
 });
+
+// ── Easter egg: Pac-Man ────────────────────────────────────────────────
+// Se activa escribiendo "pacman" en cualquier momento (mientras la ventana
+// tiene foco), salvo que el foco esté en un input/select/textarea real del
+// formulario — así no interfiere si alguien usa "pacman" como nombre de
+// archivo. Misma técnica de buffer de teclas que el Snake de PipeMirror.
+
+let pacmanBuffer = "";
+document.addEventListener("keydown", (ev) => {
+  const overlay = document.getElementById("pacman-overlay");
+  if (overlay.classList.contains("hide")) {
+    const tag = document.activeElement && document.activeElement.tagName;
+    const enCampoFormulario = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+    if (!enCampoFormulario) {
+      pacmanBuffer = (pacmanBuffer + ev.key).slice(-6).toLowerCase();
+      if (pacmanBuffer === "pacman") abrirPacman();
+    }
+  } else if (ev.key === "Escape") {
+    cerrarPacman();
+  }
+});
+
+function abrirPacman() {
+  document.getElementById("pacman-overlay").classList.remove("hide");
+  window.PacmanGame.iniciar(
+    document.getElementById("pacman-canvas"),
+    document.getElementById("pacman-score"),
+    document.getElementById("pacman-lives"),
+    document.getElementById("pacman-highscore")
+  );
+}
+function cerrarPacman() {
+  document.getElementById("pacman-overlay").classList.add("hide");
+  window.PacmanGame.detener();
+}
+document.getElementById("pacman-close").addEventListener("click", cerrarPacman);
