@@ -11,11 +11,14 @@ toca aquí. Lo único que agrega este main.py son los controles de la
 ventana (minimizar/cerrar) que necesita el titlebar propio, porque el
 wizard corre frameless (sin marco nativo de Windows).
 """
+import getpass
 import os
+import socket
 import sys
 
 import webview
 
+import tracking
 from api import Api
 
 # ── Rutas (compatibles con PyInstaller: sys._MEIPASS cuando es .exe) ──────
@@ -48,13 +51,36 @@ class WindowApi(Api):
     def minimize(self):
         webview.windows[0].minimize()
 
+    def toggle_maximize(self):
+        window = webview.windows[0]
+        if getattr(window, "is_maximized", False):
+            window.restore()
+        else:
+            window.maximize()
+
     def close_app(self):
         webview.windows[0].destroy()
+
+    def on_closing(self):
+        """Enganchado a window.events.closing — cubre la X del titlebar
+        propio, Alt+F4 y close_app(). Cierra la sesión de tracking (mejor
+        esfuerzo: si falla, no bloquea el cierre de la app)."""
+        tracking.cerrar_sesion(self._sesion_id)
+
+
+def _arrancar_tracking(api):
+    """Corre en el hilo que pywebview arranca junto con la ventana (ver
+    webview.start(func=...) más abajo) — así el tracking nunca bloquea ni
+    retrasa que la UI aparezca, aunque Azure SQL esté lento o inalcanzable."""
+    tracking.limpiar_huerfanas()
+    equipo = f"{socket.gethostname()}\\{getpass.getuser()}"
+    api._sesion_id = tracking.abrir_sesion(equipo)
+    tracking.iniciar_latido(api._sesion_id)
 
 
 def main():
     api = WindowApi()
-    webview.create_window(
+    window = webview.create_window(
         "Piezas Planas · AGP GROUP",
         INDEX_PATH,
         js_api=api,
@@ -65,7 +91,8 @@ def main():
         easy_drag=False,
         background_color="#f4f7fa",
     )
-    webview.start()
+    window.events.closing += api.on_closing
+    webview.start(_arrancar_tracking, api)
 
 
 if __name__ == "__main__":

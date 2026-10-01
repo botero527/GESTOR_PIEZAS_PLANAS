@@ -14,6 +14,7 @@ function callApi(method, ...args) {
 
 document.getElementById("btn-min").addEventListener("click", () => callApi("minimize"));
 document.getElementById("btn-close").addEventListener("click", () => callApi("close_app"));
+document.getElementById("btn-max").addEventListener("click", () => callApi("toggle_maximize"));
 
 // ── Glow de cursor ───────────────────────────────────────────────────
 
@@ -22,6 +23,22 @@ document.addEventListener("mousemove", (ev) => {
   glow.style.setProperty("--mx", (ev.clientX / innerWidth) * 100 + "%");
   glow.style.setProperty("--my", (ev.clientY / innerHeight) * 100 + "%");
 });
+
+// ── Tracking: actividad real (separa "abierta sin usar" de "en uso") ──
+// Throttle a 1 vez cada 20s aunque lleguen decenas de eventos — no tiene
+// sentido (ni es gratis) marcar actividad en cada pixel de mousemove.
+
+let ultimaActividadEnviada = 0;
+function marcarActividadThrottled() {
+  const ahora = Date.now();
+  if (ahora - ultimaActividadEnviada > 20000) {
+    ultimaActividadEnviada = ahora;
+    callApi("marcar_actividad");
+  }
+}
+["mousemove", "keydown", "click"].forEach((evt) =>
+  document.addEventListener(evt, marcarActividadThrottled)
+);
 
 // ── Canvas: partículas con gravedad (fondo ambiental) ────────────────
 
@@ -83,7 +100,8 @@ function impact(cx, cy, colorRGB) {
   colorRGB = colorRGB || "46,134,193";
   impactCanvas.classList.remove("hide");
   ictx.clearRect(0, 0, impactCanvas.width, impactCanvas.height);
-  dibujarEstallido(cx, cy, colorRGB);
+  dibujarFlash(cx, cy, colorRGB);
+  dibujarCorazones(cx, cy, colorRGB);
   animarOnda(cx, cy, colorRGB);
   setTimeout(() => {
     impactCanvas.classList.add("hide");
@@ -91,32 +109,60 @@ function impact(cx, cy, colorRGB) {
   }, 750);
 }
 
-function dibujarEstallido(cx, cy, colorRGB) {
-  const flash = ictx.createRadialGradient(cx, cy, 0, cx, cy, 40);
-  flash.addColorStop(0, `rgba(${colorRGB},0.85)`);
+function dibujarFlash(cx, cy, colorRGB) {
+  const flash = ictx.createRadialGradient(cx, cy, 0, cx, cy, 34);
+  flash.addColorStop(0, `rgba(${colorRGB},0.55)`);
   flash.addColorStop(1, `rgba(${colorRGB},0)`);
   ictx.fillStyle = flash;
-  ictx.fillRect(cx - 44, cy - 44, 88, 88);
-  const rayos = 7 + Math.floor(Math.random() * 4);
-  for (let i = 0; i < rayos; i++) {
-    const angulo = (i / rayos) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
-    dibujarRayo(cx, cy, angulo, colorRGB, 5, 1);
-  }
+  ictx.fillRect(cx - 38, cy - 38, 76, 76);
 }
-function dibujarRayo(x, y, angulo, colorRGB, segmentos, profundidad) {
-  let cx = x, cy = y, a = angulo;
-  ictx.strokeStyle = `rgba(${colorRGB},${0.8 / profundidad})`;
-  ictx.lineWidth = Math.max(0.6, 2.2 / profundidad);
+
+// Pequeños corazones que salen disparados y caen con gravedad — reemplaza
+// el rayo/shockwave original, mismo canvas y mismo momento de disparo
+// (impactAt), solo cambia el dibujo.
+function dibujarCorazon(x, y, size, colorRGB, alpha) {
+  ictx.fillStyle = `rgba(${colorRGB},${alpha})`;
+  const r = size * 0.5;
   ictx.beginPath();
-  ictx.moveTo(cx, cy);
-  for (let s = 0; s < segmentos; s++) {
-    const len = (22 - s * 2 + Math.random() * 10) / profundidad;
-    a += (Math.random() - 0.5) * 0.7;
-    cx += Math.cos(a) * len;
-    cy += Math.sin(a) * len;
-    ictx.lineTo(cx, cy);
+  ictx.arc(x - r * 0.5, y - r * 0.35, r * 0.62, 0, Math.PI * 2);
+  ictx.arc(x + r * 0.5, y - r * 0.35, r * 0.62, 0, Math.PI * 2);
+  ictx.fill();
+  ictx.beginPath();
+  ictx.moveTo(x - r * 1.08, y - r * 0.12);
+  ictx.lineTo(x + r * 1.08, y - r * 0.12);
+  ictx.lineTo(x, y + r * 1.15);
+  ictx.closePath();
+  ictx.fill();
+}
+function dibujarCorazones(cx, cy, colorRGB) {
+  const cantidad = 8 + Math.floor(Math.random() * 5);
+  const particulas = [];
+  for (let i = 0; i < cantidad; i++) {
+    const angulo = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.4;
+    const vel = 55 + Math.random() * 85;
+    particulas.push({
+      x: cx, y: cy,
+      vx: Math.cos(angulo) * vel,
+      vy: Math.sin(angulo) * vel,
+      size: 7 + Math.random() * 6,
+    });
   }
-  ictx.stroke();
+  const inicio = performance.now();
+  const duracion = 700;
+  let ultimo = inicio;
+  function frame(now) {
+    const dt = Math.min(0.032, (now - ultimo) / 1000);
+    ultimo = now;
+    const t = Math.min(1, (now - inicio) / duracion);
+    particulas.forEach((p) => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 220 * dt;
+      dibujarCorazon(p.x, p.y, p.size, colorRGB, Math.max(0, 1 - t));
+    });
+    if (t < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
 }
 function animarOnda(cx, cy, colorRGB) {
   const inicio = performance.now();
@@ -147,11 +193,17 @@ const STEP_ORDER = ["file", "tecoflex", "tamano", "datos", "tabla", "accesorio"]
 const state = {
   documento: null,
   tieneTecoflex: null,
+  pacha: null,
   piezaGrande: null,
-  modoAccesorio: null,   // "PC" | "AL" | null
+  modoAccesorio: null,   // "PC" | "AL" | "PC_AL" | null
+  tapaFormula: null,     // "PC" | "AL" | null — solo relevante si modoAccesorio === "PC_AL"
+  pu: null,              // true | false | null — independiente de PC/AL
   cantidadPc: 1,
   cantidadLites: 1,
-  nombreGeneral: "",
+  codigoVehiculo: "",
+  version: "",
+  letra: "",
+  tipoPieza: "",
   carpetaDestino: "",
   lites: [],
   tiposCristal: [],
@@ -159,26 +211,40 @@ const state = {
 };
 
 let currentStep = null;
+let stepEnteredAt = null;
 
 function resetState() {
   state.documento = null;
   state.tieneTecoflex = null;
+  state.pacha = null;
   state.piezaGrande = null;
   state.modoAccesorio = null;
+  state.tapaFormula = null;
+  state.pu = null;
   state.cantidadPc = 1;
   state.cantidadLites = 1;
-  state.nombreGeneral = "";
+  state.codigoVehiculo = "";
+  state.version = "";
+  state.letra = "";
+  state.tipoPieza = "";
   state.carpetaDestino = "";
   state.lites = [];
   document.getElementById("in-cantidad").value = 1;
-  document.getElementById("in-nombre").value = "";
+  document.getElementById("in-vehiculo").value = "";
+  document.getElementById("in-version").value = "";
+  document.getElementById("in-letra").value = "";
+  document.getElementById("in-tipo-pieza").value = "";
+  actualizarPreviewNombre();
   document.getElementById("in-cantidad-pc").value = 1;
   document.getElementById("folder-box").classList.remove("chosen");
   document.getElementById("folder-text").textContent = "Sin carpeta seleccionada";
   document.getElementById("btn-datos-next").disabled = false;
-  document.querySelectorAll("#btn-tamano-grande, #btn-tamano-pequena, #btn-accesorio-pc, #btn-accesorio-al")
+  document.querySelectorAll("#btn-tamano-grande, #btn-tamano-pequena, #btn-accesorio-pc, #btn-accesorio-al, " +
+    "#btn-accesorio-pcal, #btn-tapa-formula-pc, #btn-tapa-formula-al, #btn-pu-si, #btn-pu-no, #btn-pacha-si, #btn-pacha-no")
     .forEach((b) => b.classList.remove("selected"));
+  document.getElementById("pacha-pregunta").classList.add("hide");
   document.getElementById("accesorio-pc-cantidad").classList.add("hide");
+  document.getElementById("accesorio-tapa-formula").classList.add("hide");
   document.getElementById("accesorio-al-bloqueado").classList.add("hide");
   document.getElementById("btn-procesar").disabled = true;
 }
@@ -187,6 +253,13 @@ function resetState() {
 
 function goStep(name, direction) {
   direction = direction || (STEP_ORDER.indexOf(name) >= STEP_ORDER.indexOf(currentStep) ? "fwd" : "back");
+  // Tiempo real que el usuario pasó en la pantalla que está dejando —
+  // sirve para ver en qué paso del wizard se traba la gente (ej. la
+  // tabla de lites con muchas posiciones). No bloquea la navegación:
+  // el envío es fire-and-forget hacia Python (mejor esfuerzo).
+  if (currentStep && stepEnteredAt !== null) {
+    callApi("registrar_paso_wizard", currentStep, Math.round(performance.now() - stepEnteredAt));
+  }
   const viewport = document.getElementById("step-viewport");
   const sections = document.querySelectorAll(".step");
   sections.forEach((sec) => {
@@ -198,6 +271,7 @@ function goStep(name, direction) {
   viewport.classList.toggle("viewport-wide", wide);
   document.getElementById("btn-back").classList.toggle("wide", wide);
   currentStep = name;
+  stepEnteredAt = performance.now();
   updateStepper(name);
   updateBackButton(name);
 }
@@ -309,14 +383,30 @@ document.getElementById("btn-file-next").addEventListener("click", (ev) => {
 });
 
 // ── Paso: tecoflex ────────────────────────────────────────────────────
+// "Sí tiene" ya no avanza directo: revela la sub-pregunta de PACHA (un
+// PACHA sin TECOFLEX no existe, así que ni se pregunta si dijeron "No").
 
 document.getElementById("btn-teco-si").addEventListener("click", (ev) => {
   state.tieneTecoflex = true;
   impactAt(ev.currentTarget, "30,142,62");
-  goStep("tamano", "fwd");
+  document.getElementById("pacha-pregunta").classList.remove("hide");
 });
 document.getElementById("btn-teco-no").addEventListener("click", (ev) => {
   state.tieneTecoflex = false;
+  state.pacha = false;
+  document.getElementById("pacha-pregunta").classList.add("hide");
+  document.querySelectorAll("#btn-pacha-si, #btn-pacha-no").forEach((b) => b.classList.remove("selected"));
+  impactAt(ev.currentTarget, "100,116,139");
+  goStep("tamano", "fwd");
+});
+
+document.getElementById("btn-pacha-si").addEventListener("click", (ev) => {
+  state.pacha = true;
+  impactAt(ev.currentTarget, "30,142,62");
+  goStep("tamano", "fwd");
+});
+document.getElementById("btn-pacha-no").addEventListener("click", (ev) => {
+  state.pacha = false;
   impactAt(ev.currentTarget, "100,116,139");
   goStep("tamano", "fwd");
 });
@@ -346,19 +436,42 @@ document.getElementById("btn-elegir-carpeta").addEventListener("click", async ()
   }
 });
 
+// Preview en vivo del nombre de archivo mientras el usuario llena los 4 campos.
+function actualizarPreviewNombre() {
+  const veh = document.getElementById("in-vehiculo").value.trim();
+  const ver = document.getElementById("in-version").value.trim();
+  const let_ = document.getElementById("in-letra").value.trim();
+  const pieza = document.getElementById("in-tipo-pieza").value.trim();
+  const preview = document.getElementById("nombre-preview");
+  if (!veh || !ver || !let_ || !pieza) {
+    preview.textContent = "Ejemplo: se arma solo mientras escribes…";
+    return;
+  }
+  const base = `${veh}${ver}${let_}`;
+  preview.textContent =
+    `Lite 100 → ${base}1${pieza}.dxf   ·   Lite 200 → ${base}2${pieza}.dxf   ·   TAPA → ${base}9${pieza}.dxf   ·   PC → ${base}PC${pieza}.dxf`;
+}
+["in-vehiculo", "in-version", "in-letra", "in-tipo-pieza"].forEach((id) => {
+  document.getElementById(id).addEventListener("input", actualizarPreviewNombre);
+});
+
 document.getElementById("btn-datos-next").addEventListener("click", (ev) => {
   const cantidadInput = document.getElementById("in-cantidad");
-  const nombreInput = document.getElementById("in-nombre");
+  const vehInput = document.getElementById("in-vehiculo");
+  const verInput = document.getElementById("in-version");
+  const letraInput = document.getElementById("in-letra");
+  const piezaInput = document.getElementById("in-tipo-pieza");
   const cantidad = parseInt(cantidadInput.value, 10);
-  const nombre = nombreInput.value.trim();
 
   if (!Number.isInteger(cantidad) || cantidad < 1) {
     cantidadInput.focus();
     impactAt(ev.currentTarget, "217,48,37");
     return;
   }
-  if (!nombre) {
-    nombreInput.focus();
+  const campos = [vehInput, verInput, letraInput, piezaInput];
+  const vacio = campos.find((c) => !c.value.trim());
+  if (vacio) {
+    vacio.focus();
     impactAt(ev.currentTarget, "217,48,37");
     return;
   }
@@ -368,7 +481,10 @@ document.getElementById("btn-datos-next").addEventListener("click", (ev) => {
   }
 
   state.cantidadLites = cantidad;
-  state.nombreGeneral = nombre;
+  state.codigoVehiculo = vehInput.value.trim();
+  state.version = verInput.value.trim();
+  state.letra = letraInput.value.trim();
+  state.tipoPieza = piezaInput.value.trim();
   construirLites(cantidad);
   impactAt(ev.currentTarget, "46,134,193");
   goStep("tabla", "fwd");
@@ -527,42 +643,58 @@ document.getElementById("btn-tabla-next").addEventListener("click", (ev) => {
   goStep("accesorio", "fwd");
 });
 
-// ── Paso: PC / AL ─────────────────────────────────────────────────────
+// ── Paso: PC / AL / PC y AL + PU ───────────────────────────────────────
+
+const BTNS_ACCESORIO = ["#btn-accesorio-pc", "#btn-accesorio-al", "#btn-accesorio-pcal"];
 
 function prepararPasoAccesorio() {
   const btnAl = document.getElementById("btn-accesorio-al");
+  const btnPcAl = document.getElementById("btn-accesorio-pcal");
   const avisoBloqueado = document.getElementById("accesorio-al-bloqueado");
   const alDisponible = !!state.tieneTecoflex;
 
+  // AL y "PC y AL" necesitan TECOFLEX igual que AL solo.
   btnAl.classList.toggle("choice-disabled", !alDisponible);
+  btnPcAl.classList.toggle("choice-disabled", !alDisponible);
   avisoBloqueado.classList.toggle("hide", alDisponible);
 
-  // Si AL había quedado elegido y ahora no aplica (el usuario se devolvió
-  // y cambió tecoflex a "No"), se resetea la elección.
-  if (!alDisponible && state.modoAccesorio === "AL") {
+  // Si AL o PC_AL había quedado elegido y ahora no aplica (el usuario se
+  // devolvió y cambió tecoflex a "No"), se resetea la elección.
+  if (!alDisponible && (state.modoAccesorio === "AL" || state.modoAccesorio === "PC_AL")) {
     state.modoAccesorio = null;
+    state.tapaFormula = null;
     document.getElementById("accesorio-pc-cantidad").classList.add("hide");
-    document.querySelectorAll("#btn-accesorio-pc, #btn-accesorio-al").forEach((b) => b.classList.remove("selected"));
+    document.getElementById("accesorio-tapa-formula").classList.add("hide");
+    document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
   }
   actualizarBotonAccesorio();
 }
 
 function actualizarBotonAccesorio() {
   const btn = document.getElementById("btn-procesar");
+  const cantidadOk = Number.isInteger(state.cantidadPc) && state.cantidadPc >= 1;
+  const puRespondido = state.pu === true || state.pu === false;
+
+  let accesorioOk;
   if (state.modoAccesorio === "PC") {
-    btn.disabled = !(Number.isInteger(state.cantidadPc) && state.cantidadPc >= 1);
+    accesorioOk = cantidadOk;
   } else if (state.modoAccesorio === "AL") {
-    btn.disabled = !state.tieneTecoflex;
+    accesorioOk = !!state.tieneTecoflex;
+  } else if (state.modoAccesorio === "PC_AL") {
+    accesorioOk = cantidadOk && !!state.tieneTecoflex && (state.tapaFormula === "PC" || state.tapaFormula === "AL");
   } else {
-    btn.disabled = true;
+    accesorioOk = false;
   }
+  btn.disabled = !(accesorioOk && puRespondido);
 }
 
 document.getElementById("btn-accesorio-pc").addEventListener("click", (ev) => {
   state.modoAccesorio = "PC";
-  document.querySelectorAll("#btn-accesorio-pc, #btn-accesorio-al").forEach((b) => b.classList.remove("selected"));
+  state.tapaFormula = null;
+  document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
   ev.currentTarget.classList.add("selected");
   document.getElementById("accesorio-pc-cantidad").classList.remove("hide");
+  document.getElementById("accesorio-tapa-formula").classList.add("hide");
   impactAt(ev.currentTarget, "46,134,193");
   actualizarBotonAccesorio();
 });
@@ -573,10 +705,56 @@ document.getElementById("btn-accesorio-al").addEventListener("click", (ev) => {
     return;
   }
   state.modoAccesorio = "AL";
-  document.querySelectorAll("#btn-accesorio-pc, #btn-accesorio-al").forEach((b) => b.classList.remove("selected"));
+  state.tapaFormula = null;
+  document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
   ev.currentTarget.classList.add("selected");
   document.getElementById("accesorio-pc-cantidad").classList.add("hide");
+  document.getElementById("accesorio-tapa-formula").classList.add("hide");
   impactAt(ev.currentTarget, "46,134,193");
+  actualizarBotonAccesorio();
+});
+
+document.getElementById("btn-accesorio-pcal").addEventListener("click", (ev) => {
+  if (!state.tieneTecoflex) {
+    impactAt(ev.currentTarget, "217,48,37");
+    return;
+  }
+  state.modoAccesorio = "PC_AL";
+  document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
+  ev.currentTarget.classList.add("selected");
+  document.getElementById("accesorio-pc-cantidad").classList.remove("hide");
+  document.getElementById("accesorio-tapa-formula").classList.remove("hide");
+  impactAt(ev.currentTarget, "46,134,193");
+  actualizarBotonAccesorio();
+});
+
+document.getElementById("btn-tapa-formula-pc").addEventListener("click", (ev) => {
+  state.tapaFormula = "PC";
+  document.querySelectorAll("#btn-tapa-formula-pc, #btn-tapa-formula-al").forEach((b) => b.classList.remove("selected"));
+  ev.currentTarget.classList.add("selected");
+  impactAt(ev.currentTarget, "46,134,193");
+  actualizarBotonAccesorio();
+});
+document.getElementById("btn-tapa-formula-al").addEventListener("click", (ev) => {
+  state.tapaFormula = "AL";
+  document.querySelectorAll("#btn-tapa-formula-pc, #btn-tapa-formula-al").forEach((b) => b.classList.remove("selected"));
+  ev.currentTarget.classList.add("selected");
+  impactAt(ev.currentTarget, "46,134,193");
+  actualizarBotonAccesorio();
+});
+
+document.getElementById("btn-pu-si").addEventListener("click", (ev) => {
+  state.pu = true;
+  document.querySelectorAll("#btn-pu-si, #btn-pu-no").forEach((b) => b.classList.remove("selected"));
+  ev.currentTarget.classList.add("selected");
+  impactAt(ev.currentTarget, "46,134,193");
+  actualizarBotonAccesorio();
+});
+document.getElementById("btn-pu-no").addEventListener("click", (ev) => {
+  state.pu = false;
+  document.querySelectorAll("#btn-pu-si, #btn-pu-no").forEach((b) => b.classList.remove("selected"));
+  ev.currentTarget.classList.add("selected");
+  impactAt(ev.currentTarget, "100,116,139");
   actualizarBotonAccesorio();
 });
 
@@ -622,9 +800,12 @@ document.getElementById("btn-procesar").addEventListener("click", async (ev) => 
   const payload = {
     documento: state.documento,
     tiene_tecoflex: !!state.tieneTecoflex,
+    pacha: !!state.pacha,
     pieza_grande: !!state.piezaGrande,
     modo_accesorio: state.modoAccesorio,
-    cantidad_pc: state.modoAccesorio === "PC" ? state.cantidadPc : 0,
+    cantidad_pc: (state.modoAccesorio === "PC" || state.modoAccesorio === "PC_AL") ? state.cantidadPc : 0,
+    tapa_formula: state.modoAccesorio === "PC_AL" ? state.tapaFormula : null,
+    pu: !!state.pu,
     lites: state.lites.map((l) => ({
       posicion: l.posicion,
       tipo_cristal: l.tipo_cristal,
@@ -632,7 +813,10 @@ document.getElementById("btn-procesar").addEventListener("click", async (ev) => 
       pintura: l.pintura,
       caja: l.caja,
     })),
-    nombre_general: state.nombreGeneral,
+    codigo_vehiculo: state.codigoVehiculo,
+    version: state.version,
+    letra: state.letra,
+    tipo_pieza: state.tipoPieza,
     carpeta_destino: state.carpetaDestino,
   };
 
@@ -676,15 +860,21 @@ function mostrarResultadoOk(r) {
     tapaRow.classList.add("hide");
   }
 
+  const puRow = document.getElementById("res-pu-row");
+  if (r.archivo_pu) {
+    puRow.classList.remove("hide");
+    document.getElementById("res-pu").textContent = nombreArchivo(r.archivo_pu);
+  } else {
+    puRow.classList.add("hide");
+  }
+
   const litesList = document.getElementById("res-lites-list");
   litesList.innerHTML = "";
-  (r.archivos_lites || []).forEach((ruta) => {
-    const nombre = nombreArchivo(ruta);
-    const match = nombre.match(/_(\d+)\.dwg$/i);
-    const pos = match ? match[1] : "?";
+  (r.archivos_lites || []).forEach((item) => {
+    const nombre = nombreArchivo(item.ruta);
     const chip = document.createElement("div");
     chip.className = "res-lite-chip";
-    chip.innerHTML = `<span class="chip-pos">${pos}</span><span></span>`;
+    chip.innerHTML = `<span class="chip-pos">${item.posicion}</span><span></span>`;
     chip.querySelector("span:last-child").textContent = nombre;
     litesList.appendChild(chip);
   });
@@ -740,7 +930,7 @@ function escapeHtml(s) {
 document.getElementById("btn-abrir-carpeta").addEventListener("click", () => {
   const r = window._resultadoActual;
   if (!r) return;
-  const ruta = r.main_output || (r.archivos_lites && r.archivos_lites[0]) || r.comparativo_output || r.archivo_pc || r.archivo_tapa;
+  const ruta = r.main_output || (r.archivos_lites && r.archivos_lites[0] && r.archivos_lites[0].ruta) || r.comparativo_output || r.archivo_pc || r.archivo_tapa || r.archivo_pu;
   if (ruta) callApi("abrir_carpeta", ruta);
 });
 

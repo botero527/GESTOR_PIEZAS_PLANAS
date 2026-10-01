@@ -6,12 +6,14 @@ método devuelve dicts/listas planas (JSON-friendly) — la UI nunca toca
 objetos COM directamente.
 """
 import os
+import time
 from pathlib import Path
 
 import webview
 
 from dxf_processor import get_all_open_documents
 import compensacion
+import tracking
 from lites_processor import procesar_lites
 
 TIPOS_CRISTAL = [
@@ -22,6 +24,13 @@ TIPOS_CRISTAL = [
 
 
 class Api:
+    def __init__(self):
+        # Id de sesión de tracking de tiempos (int) — lo llena main.py una
+        # vez que abre la sesión en segundo plano. NUNCA guardar acá la
+        # ventana (ver la regla de oro en main.py), pero un id plano no
+        # tiene ese problema.
+        self._sesion_id = None
+
     # ── Archivo AutoCAD ────────────────────────────────────────────────
 
     def listar_documentos(self):
@@ -84,29 +93,74 @@ class Api:
             {
               "documento": {"name": ..., "path": ...},
               "tiene_tecoflex": bool,
+              "pacha": bool,                  # global, requiere tiene_tecoflex=True
               "pieza_grande": bool,          # global, una sola respuesta (como tecoflex)
-              "modo_accesorio": "PC"|"AL"|None,
-              "cantidad_pc": int,             # solo si modo_accesorio == "PC"
+              "modo_accesorio": "PC"|"AL"|"PC_AL"|None,
+              "cantidad_pc": int,             # si modo_accesorio es "PC" o "PC_AL"
+              "tapa_formula": "PC"|"AL"|None, # solo si modo_accesorio == "PC_AL"
+              "pu": bool,                      # independiente de PC/AL, siempre disponible
               "lites": [{"posicion":100,"tipo_cristal":...,"espesor":...,
                          "pintura":bool,"caja":bool}, ...],
-              "nombre_general": "PIEZA",
+              "codigo_vehiculo": "1890", "version": "000", "letra": "A",
+              "tipo_pieza": "001",           # arman el nombre de los archivos
               "carpeta_destino": "C:/..."
             }
         """
+        inicio = time.time()
+        exito = False
+        detalle_error = None
         try:
             resultado = procesar_lites(
                 acad_doc=payload["documento"],
                 tiene_tecoflex=bool(payload.get("tiene_tecoflex")),
                 lites=payload["lites"],
-                nombre_general=payload["nombre_general"],
+                codigo_vehiculo=payload["codigo_vehiculo"],
+                version=payload["version"],
+                letra=payload["letra"],
+                tipo_pieza=payload["tipo_pieza"],
                 carpeta_destino=payload["carpeta_destino"],
                 pieza_grande=bool(payload.get("pieza_grande")),
                 modo_accesorio=payload.get("modo_accesorio"),
                 cantidad_pc=int(payload.get("cantidad_pc") or 0),
+                pacha=bool(payload.get("pacha")),
+                tapa_formula=payload.get("tapa_formula"),
+                pu=bool(payload.get("pu")),
             )
+            exito = True
             return {"ok": True, **resultado}
         except Exception as ex:
+            detalle_error = str(ex)
             return {"ok": False, "error": str(ex)}
+        finally:
+            # Duración REAL de la parte pesada (COM + AutoCAD + guardado de
+            # archivos), sin importar si terminó bien o mal — es la métrica
+            # más útil para saber si la app se está poniendo lenta en campo.
+            tracking.registrar_procesamiento(
+                self._sesion_id,
+                cantidad_lites=len(payload.get("lites") or []),
+                modo_accesorio=payload.get("modo_accesorio"),
+                cantidad_pc=int(payload.get("cantidad_pc") or 0),
+                tiene_tecoflex=bool(payload.get("tiene_tecoflex")),
+                pieza_grande=bool(payload.get("pieza_grande")),
+                duracion_ms=int((time.time() - inicio) * 1000),
+                exito=exito,
+                detalle_error=detalle_error,
+            )
+
+    # ── Tracking de tiempos de uso (mejor esfuerzo, ver tracking.py) ─────
+
+    def registrar_paso_wizard(self, paso: str, duracion_ms: int):
+        """La UI llama esto cada vez que el usuario avanza/retrocede de
+        pantalla en el wizard, con cuánto se demoró en la pantalla que
+        deja (ver goStep() en app.js)."""
+        tracking.registrar_paso(self._sesion_id, paso, int(duracion_ms))
+        return {"ok": True}
+
+    def marcar_actividad(self):
+        """La UI llama esto (con throttle) ante cualquier click/tecla/
+        mouse real — separa 'app abierta sin usar' de 'en uso real'."""
+        tracking.marcar_actividad(self._sesion_id)
+        return {"ok": True}
 
     # ── Utilidades de resultado ──────────────────────────────────────────
 

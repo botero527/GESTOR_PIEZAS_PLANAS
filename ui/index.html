@@ -23,9 +23,13 @@
     </div>
     <div class="titlebar-controls">
       <button id="btn-min" title="Minimizar">&#8211;</button>
+      <button id="btn-max" title="Maximizar / restaurar">&#9723;</button>
       <button id="btn-close" title="Cerrar">&#10005;</button>
     </div>
   </div>
+
+  <!-- Marca de agua -->
+  <div class="watermark">Andrés Botero</div>
 
   <!-- ── Splash ─────────────────────────────────────────────────────── -->
   <div id="splash" class="splash">
@@ -96,6 +100,25 @@
               <span class="choice-label">No tiene</span>
             </button>
           </div>
+
+          <!-- Sub-pregunta PACHA: solo aparece si respondieron TECOFLEX = Sí,
+               porque un PACHA sin TECOFLEX no tiene sentido (se valida también
+               en el backend). Si TECOFLEX = No, esto ni se muestra. -->
+          <div class="hide" id="pacha-pregunta">
+            <h2>¿Es PACHA?</h2>
+            <p class="sub">Si es PACHA, el lite 100 compensa desde TECOFLEX en vez de PERIMETRO
+               (única excepción a esa regla). No afecta a los demás lites, ni a PC/TAPA.</p>
+            <div class="choice-row">
+              <button class="choice-btn choice-yes" id="btn-pacha-si">
+                <span class="choice-icon">&#10003;</span>
+                <span class="choice-label">Sí es PACHA</span>
+              </button>
+              <button class="choice-btn choice-no" id="btn-pacha-no">
+                <span class="choice-icon">&#10005;</span>
+                <span class="choice-label">No es PACHA</span>
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -128,8 +151,26 @@
           <label class="field-label" for="in-cantidad">Cantidad de lites</label>
           <input type="number" id="in-cantidad" class="field-input" min="1" step="1" value="1" />
 
-          <label class="field-label" for="in-nombre">Nombre general de la pieza</label>
-          <input type="text" id="in-nombre" class="field-input" placeholder="Ej: PUERTA_TORRE1" />
+          <label class="field-label">Nombre de los archivos</label>
+          <div class="field-row field-row-4">
+            <div>
+              <label class="field-sublabel" for="in-vehiculo">Código vehículo</label>
+              <input type="text" id="in-vehiculo" class="field-input" placeholder="1890" />
+            </div>
+            <div>
+              <label class="field-sublabel" for="in-version">Versión</label>
+              <input type="text" id="in-version" class="field-input" placeholder="000" />
+            </div>
+            <div>
+              <label class="field-sublabel" for="in-letra">Letra</label>
+              <input type="text" id="in-letra" class="field-input" placeholder="A" maxlength="1" />
+            </div>
+            <div>
+              <label class="field-sublabel" for="in-tipo-pieza">Tipo de pieza</label>
+              <input type="text" id="in-tipo-pieza" class="field-input" placeholder="001" />
+            </div>
+          </div>
+          <div class="nombre-preview" id="nombre-preview">Ejemplo: se arma solo mientras escribes…</div>
 
           <label class="field-label">Carpeta de destino</label>
           <div class="folder-box" id="folder-box">
@@ -177,9 +218,9 @@
       <!-- Paso: PC / AL -->
       <section class="step" data-step="accesorio">
         <div class="card card-hero">
-          <h2>¿La pieza es PC o AL?</h2>
-          <p class="sub">Esto define qué archivos extra se generan: PC crea los layers PC_1..PC_n + una TAPA.
-             AL solo crea la TAPA (y necesita que la pieza tenga TECOFLEX).</p>
+          <h2>¿La pieza es PC, AL, o las dos?</h2>
+          <p class="sub">PC crea los layers PC_1..PC_n. AL necesita que la pieza tenga TECOFLEX.
+             TAPA siempre se genera con alguna de las dos — si eliges "PC y AL" te pregunto cuál de las 2 fórmulas usar.</p>
 
           <div class="choice-row">
             <button class="choice-btn choice-yes" id="btn-accesorio-pc">
@@ -190,6 +231,10 @@
               <span class="choice-icon">&#9881;</span>
               <span class="choice-label">AL</span>
             </button>
+            <button class="choice-btn" id="btn-accesorio-pcal">
+              <span class="choice-icon">&#128295;&#9881;</span>
+              <span class="choice-label">PC y AL</span>
+            </button>
           </div>
           <p class="sub hide" id="accesorio-al-bloqueado">
             Esta pieza no tiene TECOFLEX, así que AL no aplica — lo que no tiene TECOFLEX no tiene AL. Solo PC está disponible.
@@ -199,6 +244,35 @@
             <label class="field-label" for="in-cantidad-pc">Cantidad de PC</label>
             <input type="number" id="in-cantidad-pc" class="field-input" min="1" step="1" value="1" />
             <p class="sub">PC_1 lleva el offset más grande, bajando de a 1&nbsp;mm hasta 4&nbsp;mm en el último.</p>
+          </div>
+
+          <!-- Solo aparece si eligieron "PC y AL" -->
+          <div class="hide" id="accesorio-tapa-formula">
+            <label class="field-label">¿La TAPA va con la fórmula de PC o la de AL?</label>
+            <div class="choice-row">
+              <button class="choice-btn choice-yes" id="btn-tapa-formula-pc">
+                <span class="choice-label">Fórmula PC<br/><small>1&nbsp;mm hacia afuera</small></span>
+              </button>
+              <button class="choice-btn choice-no" id="btn-tapa-formula-al">
+                <span class="choice-label">Fórmula AL<br/><small>copia exacta de PERIMETRO</small></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- PU: pregunta independiente de PC/AL/PC+AL, siempre visible en este paso -->
+          <div id="accesorio-pu-pregunta">
+            <label class="field-label">¿También crea PU?</label>
+            <p class="sub">PU = 10&nbsp;mm hacia afuera de TECOFLEX (o del OFFSET si no hay tecoflex, o del PERIMETRO si no hay ninguno de los dos).</p>
+            <div class="choice-row">
+              <button class="choice-btn choice-yes" id="btn-pu-si">
+                <span class="choice-icon">&#10003;</span>
+                <span class="choice-label">Sí crea PU</span>
+              </button>
+              <button class="choice-btn choice-no" id="btn-pu-no">
+                <span class="choice-icon">&#10005;</span>
+                <span class="choice-label">No crea PU</span>
+              </button>
+            </div>
           </div>
 
           <button class="btn btn-primario btn-block btn-cta" id="btn-procesar" disabled>
@@ -246,6 +320,10 @@
               <div class="resultado-row hide" id="res-tapa-row">
                 <span class="resultado-label">Archivo TAPA</span>
                 <span class="resultado-value" id="res-tapa"></span>
+              </div>
+              <div class="resultado-row hide" id="res-pu-row">
+                <span class="resultado-label">Archivo PU</span>
+                <span class="resultado-value" id="res-pu"></span>
               </div>
             </div>
 

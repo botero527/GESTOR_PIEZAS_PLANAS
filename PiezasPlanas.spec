@@ -5,7 +5,9 @@
 # datas bundlea la carpeta ui/ (HTML/CSS/JS/logo) dentro del .exe, igual
 # que macro_stivencito/PipeMirror.spec. hiddenimports trae el bloque
 # pywin32 que PyInstaller no detecta solo (mismo patrón reusado en todos
-# los proyectos AGP con AutoCAD COM).
+# los proyectos AGP con AutoCAD COM) y el bloque pymssql (tracking de
+# tiempos de uso, mismo patrón que PipeMirror.spec: trae su propio driver
+# embebido, no necesita el ODBC Driver de Microsoft instalado en el PC).
 
 a = Analysis(
     ['main.py'],
@@ -17,6 +19,9 @@ a = Analysis(
         'win32com.server',
         'pythoncom',
         'pywintypes',
+        'pymssql',
+        'pymssql._pymssql',
+        'pymssql._mssql',
     ],
     hookspath=[],
     hooksconfig={},

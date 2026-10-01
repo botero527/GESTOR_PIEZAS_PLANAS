@@ -134,6 +134,12 @@ def _apply_layer_color(entities, layer_name, color):
             e.color = color
         except Exception:
             pass
+        try:
+            # Ancho global en 0 — si no, las líneas nuevas heredan el ancho
+            # del PERIMETRO original y salen gruesas/rellenas en vez de finas.
+            e.ConstantWidth = 0
+        except Exception:
+            pass
 
 
 def _layer_match(entity, layer_name):
