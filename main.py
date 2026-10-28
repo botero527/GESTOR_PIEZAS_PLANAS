@@ -48,15 +48,31 @@ class WindowApi(Api):
     en PipeMirror/main.py.
     """
 
+    def __init__(self):
+        super().__init__()
+        # pywebview 6 no expone si la ventana está maximizada (no existe
+        # `window.is_maximized` — por eso el toggle siempre maximizaba y
+        # nunca volvía). Se lleva el estado acá (un bool, no la ventana) y
+        # se sincroniza con los eventos maximized/restored.
+        self._maximizada = False
+
     def minimize(self):
         webview.windows[0].minimize()
 
     def toggle_maximize(self):
         window = webview.windows[0]
-        if getattr(window, "is_maximized", False):
+        if self._maximizada:
             window.restore()
+            self._maximizada = False
         else:
             window.maximize()
+            self._maximizada = True
+
+    def on_maximized(self):
+        self._maximizada = True
+
+    def on_restored(self):
+        self._maximizada = False
 
     def close_app(self):
         webview.windows[0].destroy()
@@ -92,6 +108,8 @@ def main():
         background_color="#f4f7fa",
     )
     window.events.closing += api.on_closing
+    window.events.maximized += api.on_maximized
+    window.events.restored += api.on_restored
     webview.start(_arrancar_tracking, api)
 
 

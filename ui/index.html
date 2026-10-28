@@ -220,7 +220,7 @@
         <div class="card card-hero">
           <h2>¿La pieza es PC, AL, o las dos?</h2>
           <p class="sub">PC crea los layers PC_1..PC_n. AL necesita que la pieza tenga TECOFLEX.
-             TAPA siempre se genera con alguna de las dos — si eliges "PC y AL" te pregunto cuál de las 2 fórmulas usar.</p>
+             TAPA siempre se genera: con PC va 1&nbsp;mm hacia afuera; con AL (o PC y AL) es copia exacta de PERIMETRO.</p>
 
           <div class="choice-row">
             <button class="choice-btn choice-yes" id="btn-accesorio-pc">
@@ -244,19 +244,6 @@
             <label class="field-label" for="in-cantidad-pc">Cantidad de PC</label>
             <input type="number" id="in-cantidad-pc" class="field-input" min="1" step="1" value="1" />
             <p class="sub">PC_1 lleva el offset más grande, bajando de a 1&nbsp;mm hasta 4&nbsp;mm en el último.</p>
-          </div>
-
-          <!-- Solo aparece si eligieron "PC y AL" -->
-          <div class="hide" id="accesorio-tapa-formula">
-            <label class="field-label">¿La TAPA va con la fórmula de PC o la de AL?</label>
-            <div class="choice-row">
-              <button class="choice-btn choice-yes" id="btn-tapa-formula-pc">
-                <span class="choice-label">Fórmula PC<br/><small>1&nbsp;mm hacia afuera</small></span>
-              </button>
-              <button class="choice-btn choice-no" id="btn-tapa-formula-al">
-                <span class="choice-label">Fórmula AL<br/><small>copia exacta de PERIMETRO</small></span>
-              </button>
-            </div>
           </div>
 
           <!-- PU: pregunta independiente de PC/AL/PC+AL, siempre visible en este paso -->

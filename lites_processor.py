@@ -38,31 +38,45 @@ original):
        fuente que le toque (PERIMETRO crudo si es el lite 100,
        OFFSET/TECOFLEX_BASE si no) -> layer "<posicion>_<compensacion>"
        (ej. "200_1.5").
-    4. Si se eligió PC: por cada PC (1..n) un offset independiente hacia
-       adentro desde la fuente de "el resto" -> layers PC_1..PC_n (PC_1 =
-       cantidad_pc+3 mm, bajando de a 1 hasta 4 en el último).
-    5. TAPA (siempre que se eligió PC o AL, AL requiere TECOFLEX): la
-       fórmula depende del modo de accesorio (no de PACHA). PC: 1mm hacia
-       AFUERA de la fuente de "el resto" (esa fuente ya es el tecoflex de
-       la base si hay tecoflex, o la base cruda si no) — el tamaño de la
-       pieza (grande/pequeña) ya no cambia esta cuenta. AL: copia EXACTA
-       de PERIMETRO, sin ningún offset (0mm).
-    6. Se guarda el archivo principal (SaveAs, como siempre — este sí
+    4. Si se eligió PC (o PC_AL): por cada PC (1..n) un offset
+       independiente hacia adentro desde la fuente de "el resto" ->
+       layers PC_1..PC_n (PC_1 = cantidad_pc+3 mm, bajando de a 1 hasta 4
+       en el último).
+    5. TAPA (siempre que se eligió PC, AL o PC_AL; AL y PC_AL requieren
+       TECOFLEX): la fórmula depende del modo de accesorio (no de PACHA).
+       PC: 1mm hacia AFUERA de la fuente de "el resto" (esa fuente ya es
+       el tecoflex de la base si hay tecoflex, o la base cruda si no) —
+       el tamaño de la pieza (grande/pequeña) ya no cambia esta cuenta.
+       AL y PC_AL: copia EXACTA de PERIMETRO, sin ningún offset (0mm) —
+       si AL está en la selección, la TAPA va con la lógica de AL.
+    6. PU (opcional, independiente de PC/AL/PC_AL): 10mm hacia AFUERA de
+       la fuente de "el resto" — mismo criterio de fuente que PC/TAPA,
+       solo cambia la magnitud fija (10mm).
+    7. Se guarda el archivo principal (SaveAs, como siempre — este sí
        queda en DWG, es el archivo de trabajo original del usuario).
-    7. Se genera un DXF independiente por lite (SOLO su resultado,
+       Antes de cada guardado (principal y cada archivo de salida) se
+       purga el dibujo (mejor esfuerzo, nunca bloquea el guardado) para
+       que los archivos queden limpios de layers/bloques sin usar.
+    8. Se genera un DXF independiente por lite (SOLO su resultado,
        centrado en el origen), uno para PC (SOLO PC_1..PC_n, sin TAPA),
-       uno para TAPA sola, y un DXF comparativo (fila de piezas: la base
-       original + su TECOFLEX si aplica + el resultado de cada lite, con
-       etiqueta de posición — este es el único que conserva más de una
-       cosa por diseño, para poder comparar). Todos (lite/PC/TAPA/
-       comparativo) se guardan en DXF, no DWG.
+       uno para TAPA sola, uno para PU sola (si se pidió), y un DXF
+       comparativo con TODO lo fabricado (un slot por lite + PC + TAPA +
+       PU, cada uno con su base + su TECOFLEX si aplica + su resultado,
+       con etiqueta — este es el único que conserva más de una cosa por
+       diseño, para poder comparar). Todos (lite/PC/TAPA/PU/comparativo) se guardan en
+       DXF, no DWG. El guardado de cada archivo de salida reintenta
+       agresivamente (copia+apertura completa, no solo la llamada COM)
+       ante fallas intermitentes vistas en campo en otros computadores —
+       si aun después de todos los reintentos algo no se pudo generar,
+       queda como aviso (warning) en vez de tumbar el resto del proceso.
 
 Nombre de los archivos de salida (lo arma el usuario con 4 campos):
 código de vehículo + versión + letra + <dígito de posición, o "9" para
-TAPA, o "PC" para el archivo PC> + tipo de pieza, todo pegado (ej.
-"1890" + "000" + "A" + "2" + "001" = "1890000A2001.dxf" para el lite de
-posición 200; "1890000A9001.dxf" para la TAPA; "1890000APC001.dxf" para
-el PC). El comparativo usa la misma base + tipo de pieza + sufijo
+TAPA, "PC" para el archivo PC, o "PU" para el archivo PU> + tipo de
+pieza, todo pegado (ej. "1890" + "000" + "A" + "2" + "001" =
+"1890000A2001.dxf" para el lite de posición 200; "1890000A9001.dxf" para
+la TAPA; "1890000APC001.dxf" para el PC; "1890000APU001.dxf" para el PU).
+El comparativo usa la misma base + tipo de pieza + sufijo
 "_comparativo.dxf".
 """
 import os
@@ -118,6 +132,36 @@ def _retry_com(func, intentos=8, espera=0.5):
             ultimo_error = ex
             time.sleep(espera * (intento + 1))
     raise ultimo_error
+
+
+def _retry_cualquier_error(func, intentos=8, espera=0.5):
+    """Como _retry_com, pero atrapa CUALQUIER excepción, no solo
+    pywintypes.com_error. Visto en campo (otros computadores, 28-sept-2026):
+    un objeto COM dinámico de pywin32 que queda desconectado/inválido
+    puede fallar con un simple AttributeError al pedirle un método (ej.
+    '<unknown>.Open'), no con com_error — y _retry_com no lo reintentaba,
+    tiraba la toalla al primer intento."""
+    ultimo_error = None
+    for intento in range(intentos):
+        try:
+            return func()
+        except Exception as ex:
+            ultimo_error = ex
+            time.sleep(espera * (intento + 1))
+    raise ultimo_error
+
+
+def _purgar_dibujo(doc):
+    """Purga el dibujo (layers/bloques/estilos/linetypes sin usar) antes
+    de guardarlo, para que los archivos de salida queden limpios — mejor
+    esfuerzo: si el purge falla por lo que sea, se guarda igual SIN
+    purgar en vez de romper el guardado completo (el guardado nunca debe
+    fallar por esto)."""
+    try:
+        doc.SendCommand("_.-PURGE\n_All\n*\n_No\n")
+        time.sleep(0.4)
+    except Exception:
+        pass
 
 
 # ── Offset hacia afuera (opuesto a _offset_entity, que es hacia adentro) ──
@@ -397,7 +441,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
                     tipo_pieza: str, carpeta_destino: str,
                     pieza_grande: bool = False, modo_accesorio: str = None,
                     cantidad_pc: int = 0, pacha: bool = False,
-                    tapa_formula: str = None, pu: bool = False) -> dict:
+                    pu: bool = False) -> dict:
     """
     lites: lista de dicts, uno por lite (posición 100, 200, 300...):
         {"posicion": 100, "tipo_cristal": "SODALIME_WHITE", "espesor": 8,
@@ -425,10 +469,8 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
           sin TECOFLEX no puede ir en AL). TAPA = copia EXACTA de
           PERIMETRO, sin ningún offset (0mm) — regla distinta a PC.
         - "PC_AL": genera layers PC_1..PC_n igual que "PC" (requiere
-          tiene_tecoflex, igual que AL). La fórmula de TAPA no se asume
-          sola — la elige el usuario en la UI vía `tapa_formula` ("PC" o
-          "AL"), porque es una pieza que combina ambos accesorios y no
-          hay una única regla de negocio clara para ese caso.
+          tiene_tecoflex, igual que AL). TAPA con la lógica de AL (copia
+          exacta de PERIMETRO) — regla confirmada por Andrés 7-oct-2026.
         Todos generan siempre el archivo TAPA (con la fórmula que le
         corresponda).
 
@@ -467,11 +509,6 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
         )
     if modo_accesorio in ("PC", "PC_AL") and (not isinstance(cantidad_pc, int) or cantidad_pc < 1):
         raise ValueError("La cantidad de PC debe ser un número entero de 1 para arriba.")
-    if modo_accesorio == "PC_AL" and tapa_formula not in ("PC", "AL"):
-        raise ValueError(
-            "Con PC y AL combinados hace falta saber qué fórmula usa la "
-            "TAPA (PC o AL) — falta esa respuesta."
-        )
     if pacha and not tiene_tecoflex:
         raise ValueError(
             "PACHA necesita que la pieza tenga TECOFLEX — no puede haber "
@@ -659,19 +696,15 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
     #   - PC: 1mm hacia AFUERA de la fuente de "el resto" (fuente_resto ya
     #     es el tecoflex de esa base si tiene tecoflex, o la base cruda si
     #     no) — ya no depende de si la pieza es grande o pequeña.
-    #   - AL: copia EXACTA de PERIMETRO, sin ningún offset (0mm).
-    #   - PC_AL: no hay una regla de negocio única para este caso (pieza
-    #     combina los dos accesorios), así que la UI le pregunta al
-    #     usuario cuál de las 2 fórmulas aplica (`tapa_formula`).
+    #   - AL y PC_AL: copia EXACTA de PERIMETRO, sin ningún offset (0mm) —
+    #     si AL está en la selección, la TAPA va con la lógica de AL.
     layer_tapa = None
+    tapa_es_al = modo_accesorio in ("AL", "PC_AL")
     if modo_accesorio in ("PC", "AL", "PC_AL"):
-        formula_tapa = "AL" if modo_accesorio == "AL" else (
-            tapa_formula if modo_accesorio == "PC_AL" else "PC"
-        )
         layer_tapa = "TAPA"
         _ensure_layer(doc, layer_tapa, COLOR_RESULTADO)
         _limpiar_layer(doc, layer_tapa)
-        if formula_tapa == "AL":
+        if tapa_es_al:
             tapa_ents = [perimetro.Copy()]
         else:
             tapa_ents = _offset_outward(fuente_resto, 1.0)
@@ -698,6 +731,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
     # archivos de lite/PC/TAPA/comparativo a partir de un archivo que
     # nunca se guardó bien solo producía una cascada de errores confusos
     # más adelante (WinError 2 al copiar un archivo mal escrito).
+    _purgar_dibujo(doc)
     try:
         _retry_com(lambda: doc.SaveAs(str(original_path)))
     except Exception as ex:
@@ -721,12 +755,45 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
                 f"Lite {pos}: no se pudo guardar el archivo independiente: {ex}"
             )
 
-    # ── Archivo comparativo (base + tecoflex + resultado, sin centrar) ────
+    # ── Archivo comparativo: TODO lo fabricado (lites + PC + TAPA + PU) ───
+    slots = [
+        {
+            "etiqueta": f"LITE {info['posicion']}",
+            "base_layer_name": info["base_layer_name"],
+            "tecoflex_layer_name": info["tecoflex_layer_name"],
+            "layers_resultado": [info["layer_resultado"]],
+        }
+        for info in resultados_por_lite
+    ]
+    if layers_pc:
+        slots.append({
+            "etiqueta": "PC",
+            "base_layer_name": base_resto.Layer,
+            "tecoflex_layer_name": tecoflex_resto_layer,
+            "layers_resultado": list(layers_pc),
+        })
+    if layer_tapa:
+        # TAPA de AL es copia de PERIMETRO -> se compara contra PERIMETRO;
+        # TAPA de PC sale de la fuente del resto -> se compara contra esa.
+        slots.append({
+            "etiqueta": "TAPA",
+            "base_layer_name": perimetro.Layer if tapa_es_al else base_resto.Layer,
+            "tecoflex_layer_name": None if tapa_es_al else tecoflex_resto_layer,
+            "layers_resultado": [layer_tapa],
+        })
+    if layer_pu:
+        slots.append({
+            "etiqueta": "PU",
+            "base_layer_name": base_resto.Layer,
+            "tecoflex_layer_name": tecoflex_resto_layer,
+            "layers_resultado": [layer_pu],
+        })
+
     comparativo_output = None
     try:
         fname = f"{nombre_base}{tipo_pieza}_comparativo.dxf"
         destino = str(Path(carpeta_destino) / fname)
-        _guardar_comparativo(acad, original_path, destino, resultados_por_lite, ancho_pieza)
+        _guardar_comparativo(acad, original_path, destino, slots, ancho_pieza)
         comparativo_output = destino
     except Exception as ex:
         warnings.append(f"No se pudo crear el archivo comparativo: {ex}")
@@ -782,54 +849,73 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
 
 # ── Generación de archivos por copia (mismo patrón que _create_pc_file) ──
 
-def _abrir_copia_temporal(acad, original_path):
+def _abrir_copia_temporal(acad, original_path, intentos_totales=3):
     """Copia el DWG original a un archivo DWG temporal (AutoCAD necesita
     editar en DWG, no puede editar un DXF en vivo de la misma forma) y lo
     abre. Devuelve (doc, ruta_temporal) — quien llama guarda el resultado
     final donde corresponda (típicamente DXF, vía SaveAs) y después borra
-    la ruta temporal con `_borrar_temp`."""
+    la ruta temporal con `_borrar_temp`.
+
+    Blindado (28-sept-2026, reportado en otros computadores): el Open()
+    reintenta con `_retry_cualquier_error` (no solo com_error), y si aun
+    así toda la secuencia completa (copiar+abrir+esperar listo) falla, se
+    reintenta DE CERO hasta `intentos_totales` veces, con una copia
+    temporal NUEVA cada vez — un archivo temporal que quedó en mal estado
+    no se arregla solo reintentando sobre el mismo archivo."""
     original_path = str(original_path).replace("/", "\\")
-    temp_path = os.path.join(
-        tempfile.gettempdir(), f"piezasplanas_{os.getpid()}_{uuid.uuid4().hex[:8]}.dwg"
-    )
-    try:
-        shutil.copy2(original_path, temp_path)
-    except Exception as ex:
-        raise RuntimeError(f"No se pudo copiar el DWG: {ex}")
-    try:
-        doc = _retry_com(lambda: acad.Documents.Open(temp_path))
-    except Exception as ex:
-        raise RuntimeError(f"No se pudo abrir la copia: {ex}")
-    try:
-        doc.Activate()
-    except Exception:
-        pass
-
-    # El documento recién abierto a veces no está "listo" de inmediato —
-    # pedirle .ModelSpace un instante después de Open() puede fallar con
-    # AttributeError (no pywintypes.com_error, por eso _retry_com no lo
-    # atrapa). Se espera a que responda antes de devolverlo.
-    for intento in range(10):
+    ultimo_error = None
+    for intento_total in range(intentos_totales):
+        temp_path = os.path.join(
+            tempfile.gettempdir(), f"piezasplanas_{os.getpid()}_{uuid.uuid4().hex[:8]}.dwg"
+        )
         try:
-            _ = doc.ModelSpace.Count
-            break
-        except Exception:
-            time.sleep(0.3 * (intento + 1))
-    else:
-        raise RuntimeError("La copia del DWG no terminó de abrir a tiempo.")
+            try:
+                shutil.copy2(original_path, temp_path)
+            except Exception as ex:
+                raise RuntimeError(f"No se pudo copiar el DWG: {ex}")
+            try:
+                doc = _retry_cualquier_error(lambda: acad.Documents.Open(temp_path))
+            except Exception as ex:
+                raise RuntimeError(f"No se pudo abrir la copia: {ex}")
+            try:
+                doc.Activate()
+            except Exception:
+                pass
 
-    return doc, temp_path
+            # El documento recién abierto a veces no está "listo" de
+            # inmediato — pedirle .ModelSpace un instante después de
+            # Open() puede fallar con AttributeError.
+            for intento in range(10):
+                try:
+                    _ = doc.ModelSpace.Count
+                    break
+                except Exception:
+                    time.sleep(0.3 * (intento + 1))
+            else:
+                raise RuntimeError("La copia del DWG no terminó de abrir a tiempo.")
+
+            return doc, temp_path
+        except Exception as ex:
+            ultimo_error = ex
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+            time.sleep(1.0 * (intento_total + 1))
+    raise ultimo_error
 
 
 def _guardar_como_dxf(acad, doc, destino_dxf, temp_path):
     """Guarda `doc` como DXF en `destino_dxf` (AC2018_DXF), lo cierra, y
-    borra el DWG temporal que se usó para editar."""
+    borra el DWG temporal que se usó para editar. Purga antes de guardar
+    (mejor esfuerzo) para que el DXF de salida quede limpio."""
     destino_dxf = str(destino_dxf).replace("/", "\\")
     if os.path.exists(destino_dxf):
         try:
             os.remove(destino_dxf)
         except Exception:
             pass
+    _purgar_dibujo(doc)
     try:
         _retry_com(lambda: doc.SaveAs(destino_dxf, DXF_TYPE))
     finally:
@@ -878,89 +964,95 @@ def _guardar_solo_layers(acad, original_path, destino_dxf, layers_a_conservar, e
     _guardar_como_dxf(acad, copia_doc, destino_dxf, temp_path)
 
 
-def _guardar_comparativo(acad, original_path, destino, resultados_por_lite, ancho_pieza):
-    """Copia el DWG original y arma una fila de piezas: la base original
-    de cada lite (PERIMETRO para el lite 100, OFFSET para el resto, más
-    su TECOFLEX si existe) junto al RESULTADO de ese lite, uno al lado
-    del otro con un espacio, y una etiqueta de texto con la posición —
-    para poder ver a simple vista cómo compensó cada uno. A diferencia
-    de los archivos individuales, este SÍ conserva más de una cosa por
-    diseño (esa es la idea, comparar) — pero SOLO lo relevante: nada de
-    PC_1/PC_2/TAPA ni layers viejos de otra corrida, eso se borra antes."""
+def _guardar_comparativo(acad, original_path, destino, slots, ancho_pieza):
+    """Copia el DWG original y arma una fila con TODO lo que se fabricó:
+    un "slot" por cada lite, y además uno para PC (todos los PC_1..PC_n
+    juntos), uno para TAPA y uno para PU si se generaron. Cada slot lleva
+    su base (PERIMETRO u OFFSET), su TECOFLEX si aplica, y su resultado,
+    uno al lado del otro con un espacio y una etiqueta de texto — para
+    revisar a simple vista que todo compensó bien.
+
+    slots: lista de dicts {"etiqueta", "base_layer_name",
+    "tecoflex_layer_name" (o None), "layers_resultado" (lista)}.
+
+    Cada slot recibe su PROPIA copia de base/tecoflex y al final se
+    borran los originales — así ningún slot hereda bases ajenas (antes,
+    el OFFSET original quedaba debajo del slot del lite 100)."""
     copia_doc, temp_path = _abrir_copia_temporal(acad, original_path)
     msp = copia_doc.ModelSpace  # solo para AddText — las lecturas usan _enumerar_msp_seguro
 
-    # Borrar todo lo que no sea la base/tecoflex/resultado de ALGÚN lite —
-    # sin esto, PC_1/PC_2/TAPA y cualquier layer huérfano de una corrida
-    # anterior venían "de regalo" en la copia completa del archivo principal.
-    layers_relevantes = set()
-    for info in resultados_por_lite:
-        layers_relevantes.add(info["base_layer_name"].upper())
-        layers_relevantes.add(info["layer_resultado"].upper())
-        if info.get("tecoflex_layer_name"):
-            layers_relevantes.add(info["tecoflex_layer_name"].upper())
+    layers_ref = set()       # bases + tecoflex (se copian a cada slot)
+    layers_res = set()       # resultados (cada uno pertenece a un solo slot)
+    for s in slots:
+        layers_ref.add(s["base_layer_name"].upper())
+        if s.get("tecoflex_layer_name"):
+            layers_ref.add(s["tecoflex_layer_name"].upper())
+        for l in s["layers_resultado"]:
+            layers_res.add(l.upper())
+
+    # Borrar todo lo que no sea base/tecoflex/resultado de algún slot (layers
+    # huérfanos de otra corrida, etc.).
     for e in _enumerar_msp_seguro(copia_doc):
         try:
-            if e.Layer.upper() not in layers_relevantes:
+            if e.Layer.upper() not in layers_ref | layers_res:
                 e.Delete()
         except Exception:
             pass
 
-    for i, info in enumerate(resultados_por_lite):
-        dx = i * (ancho_pieza + GAP_COMPARATIVO)
+    # Foto de los originales de referencia ANTES de empezar a copiar — si
+    # no, las copias recién hechas (mismo layer) se volverían a copiar.
+    originales_ref = []
+    for e in _enumerar_msp_seguro(copia_doc):
+        try:
+            if e.Layer.upper() in layers_ref:
+                originales_ref.append(e)
+        except Exception:
+            pass
 
-        entidades_msp = _enumerar_msp_seguro(copia_doc)
-        entidades_base = [
-            e for e in entidades_msp
-            if e.Layer.upper() == info["base_layer_name"].upper()
-        ]
-        entidades_resultado = [
-            e for e in entidades_msp
-            if e.Layer.upper() == info["layer_resultado"].upper()
-        ]
-        entidades_tecoflex = []
-        if info.get("tecoflex_layer_name"):
-            entidades_tecoflex = [
-                e for e in entidades_msp
-                if e.Layer.upper() == info["tecoflex_layer_name"].upper()
-            ]
-        if not entidades_base:
+    for i, s in enumerate(slots):
+        dx = i * (ancho_pieza + GAP_COMPARATIVO)
+        base_up = s["base_layer_name"].upper()
+        tf_up = (s.get("tecoflex_layer_name") or "").upper()
+        res_up = {l.upper() for l in s["layers_resultado"]}
+
+        bases = [e for e in originales_ref if e.Layer.upper() == base_up]
+        if not bases:
             continue
-        mn, _ = entidades_base[0].GetBoundingBox()
+        mn, _ = bases[0].GetBoundingBox()
         x0, y0 = mn[0], mn[1]
 
-        for e in entidades_resultado:
+        for e in originales_ref:
             try:
-                _mover(e, dx)
+                capa = e.Layer.upper()
+            except Exception:
+                continue
+            if capa == base_up or (tf_up and capa == tf_up):
+                try:
+                    copia = e.Copy()
+                    _mover(copia, dx)
+                except Exception:
+                    pass
+
+        for e in _enumerar_msp_seguro(copia_doc):
+            try:
+                if e.Layer.upper() in res_up:
+                    _mover(e, dx)
             except Exception:
                 pass
-
-        if i > 0:
-            for base in entidades_base:
-                try:
-                    copia = base.Copy()
-                    _mover(copia, dx)
-                except Exception:
-                    pass
-            for tf in entidades_tecoflex:
-                try:
-                    copia = tf.Copy()
-                    _mover(copia, dx)
-                except Exception:
-                    pass
-        else:
-            # El TECOFLEX del lite 100 (i=0) no se movió con el resultado
-            # (el resultado del lite 100 tampoco sale de tecoflex), así que
-            # simplemente se queda donde está — no hace falta copiarlo.
-            pass
 
         punto = win32com.client.VARIANT(
             pythoncom.VT_ARRAY | pythoncom.VT_R8,
             [x0 + dx, y0 - 20.0, 0.0]
         )
         try:
-            texto = msp.AddText(f"LITE {info['posicion']}", punto, 20.0)
+            texto = msp.AddText(s["etiqueta"], punto, 20.0)
             texto.Layer = "0"
+        except Exception:
+            pass
+
+    for e in originales_ref:
+        try:
+            e.Delete()
         except Exception:
             pass
 

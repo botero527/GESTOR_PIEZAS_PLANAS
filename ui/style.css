@@ -250,6 +250,10 @@ body {
   box-shadow: 0 12px 34px -16px rgba(30, 60, 90, 0.18);
 }
 .card-hero { max-width: 600px; margin: 0 auto; }
+/* El body tiene overflow:hidden (ventana frameless), así que cualquier
+   paso cuyo contenido crezca (ej. PC/AL + cantidad + PU) necesita su
+   propio scroll — mismo criterio que ya usaba .card-resultado. */
+.step .card { max-height: calc(100vh - 130px); overflow-y: auto; }
 .card-center { text-align: center; }
 
 .card h2 { font-size: 19px; font-weight: 800; color: var(--text); margin-bottom: 6px; }

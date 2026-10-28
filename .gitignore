@@ -1,0 +1,8 @@
+# Credenciales: db_config.py vive solo en el PC de desarrollo (ver db_config.example.py)
+db_config.py
+
+# Artefactos de compilación (PyInstaller) — el .exe lleva db_config.py adentro
+build/
+dist/
+__pycache__/
+*.pyc

@@ -1,4 +1,6 @@
 """Procesador de Piezas Planas — trabaja directo sobre AutoCAD abierto."""
+import time
+
 import pythoncom
 import win32com.client
 from pathlib import Path
@@ -76,11 +78,26 @@ def get_active_file_info() -> dict:
 # ── Layers ────────────────────────────────────────────────────────────────────
 
 def _ensure_layer(doc, name, color):
-    try:
-        layer = doc.Layers.Item(name)
-    except Exception:
-        layer = doc.Layers.Add(name)
-    layer.color = color
+    """Crea el layer si no existe y le pone el color. Blindado (28-sept-
+    2026, visto en otros computadores): justo después de `Layers.Add()`,
+    el objeto COM dinámico que devuelve a veces no está listo todavía y
+    falla con AttributeError al ponerle `.color` ("Property 'Add.color'
+    can not be set") — no es un error de lógica, es timing de COM. Se
+    reintenta pidiendo el layer FRESCO por `.Item()` (ya existe en la
+    colección aunque el objeto recién creado no respondiera bien)."""
+    ultimo_error = None
+    for intento in range(6):
+        try:
+            try:
+                layer = doc.Layers.Item(name)
+            except Exception:
+                layer = doc.Layers.Add(name)
+            layer.color = color
+            return
+        except Exception as ex:
+            ultimo_error = ex
+            time.sleep(0.3 * (intento + 1))
+    raise ultimo_error
 
 
 # ── Offset nativo ─────────────────────────────────────────────────────────────

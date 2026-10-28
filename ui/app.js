@@ -196,7 +196,6 @@ const state = {
   pacha: null,
   piezaGrande: null,
   modoAccesorio: null,   // "PC" | "AL" | "PC_AL" | null
-  tapaFormula: null,     // "PC" | "AL" | null — solo relevante si modoAccesorio === "PC_AL"
   pu: null,              // true | false | null — independiente de PC/AL
   cantidadPc: 1,
   cantidadLites: 1,
@@ -219,7 +218,6 @@ function resetState() {
   state.pacha = null;
   state.piezaGrande = null;
   state.modoAccesorio = null;
-  state.tapaFormula = null;
   state.pu = null;
   state.cantidadPc = 1;
   state.cantidadLites = 1;
@@ -240,11 +238,10 @@ function resetState() {
   document.getElementById("folder-text").textContent = "Sin carpeta seleccionada";
   document.getElementById("btn-datos-next").disabled = false;
   document.querySelectorAll("#btn-tamano-grande, #btn-tamano-pequena, #btn-accesorio-pc, #btn-accesorio-al, " +
-    "#btn-accesorio-pcal, #btn-tapa-formula-pc, #btn-tapa-formula-al, #btn-pu-si, #btn-pu-no, #btn-pacha-si, #btn-pacha-no")
+    "#btn-accesorio-pcal, #btn-pu-si, #btn-pu-no, #btn-pacha-si, #btn-pacha-no")
     .forEach((b) => b.classList.remove("selected"));
   document.getElementById("pacha-pregunta").classList.add("hide");
   document.getElementById("accesorio-pc-cantidad").classList.add("hide");
-  document.getElementById("accesorio-tapa-formula").classList.add("hide");
   document.getElementById("accesorio-al-bloqueado").classList.add("hide");
   document.getElementById("btn-procesar").disabled = true;
 }
@@ -662,9 +659,7 @@ function prepararPasoAccesorio() {
   // devolvió y cambió tecoflex a "No"), se resetea la elección.
   if (!alDisponible && (state.modoAccesorio === "AL" || state.modoAccesorio === "PC_AL")) {
     state.modoAccesorio = null;
-    state.tapaFormula = null;
     document.getElementById("accesorio-pc-cantidad").classList.add("hide");
-    document.getElementById("accesorio-tapa-formula").classList.add("hide");
     document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
   }
   actualizarBotonAccesorio();
@@ -681,7 +676,7 @@ function actualizarBotonAccesorio() {
   } else if (state.modoAccesorio === "AL") {
     accesorioOk = !!state.tieneTecoflex;
   } else if (state.modoAccesorio === "PC_AL") {
-    accesorioOk = cantidadOk && !!state.tieneTecoflex && (state.tapaFormula === "PC" || state.tapaFormula === "AL");
+    accesorioOk = cantidadOk && !!state.tieneTecoflex;
   } else {
     accesorioOk = false;
   }
@@ -690,11 +685,9 @@ function actualizarBotonAccesorio() {
 
 document.getElementById("btn-accesorio-pc").addEventListener("click", (ev) => {
   state.modoAccesorio = "PC";
-  state.tapaFormula = null;
   document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
   ev.currentTarget.classList.add("selected");
   document.getElementById("accesorio-pc-cantidad").classList.remove("hide");
-  document.getElementById("accesorio-tapa-formula").classList.add("hide");
   impactAt(ev.currentTarget, "46,134,193");
   actualizarBotonAccesorio();
 });
@@ -705,11 +698,9 @@ document.getElementById("btn-accesorio-al").addEventListener("click", (ev) => {
     return;
   }
   state.modoAccesorio = "AL";
-  state.tapaFormula = null;
   document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
   ev.currentTarget.classList.add("selected");
   document.getElementById("accesorio-pc-cantidad").classList.add("hide");
-  document.getElementById("accesorio-tapa-formula").classList.add("hide");
   impactAt(ev.currentTarget, "46,134,193");
   actualizarBotonAccesorio();
 });
@@ -723,22 +714,6 @@ document.getElementById("btn-accesorio-pcal").addEventListener("click", (ev) => 
   document.querySelectorAll(BTNS_ACCESORIO.join(", ")).forEach((b) => b.classList.remove("selected"));
   ev.currentTarget.classList.add("selected");
   document.getElementById("accesorio-pc-cantidad").classList.remove("hide");
-  document.getElementById("accesorio-tapa-formula").classList.remove("hide");
-  impactAt(ev.currentTarget, "46,134,193");
-  actualizarBotonAccesorio();
-});
-
-document.getElementById("btn-tapa-formula-pc").addEventListener("click", (ev) => {
-  state.tapaFormula = "PC";
-  document.querySelectorAll("#btn-tapa-formula-pc, #btn-tapa-formula-al").forEach((b) => b.classList.remove("selected"));
-  ev.currentTarget.classList.add("selected");
-  impactAt(ev.currentTarget, "46,134,193");
-  actualizarBotonAccesorio();
-});
-document.getElementById("btn-tapa-formula-al").addEventListener("click", (ev) => {
-  state.tapaFormula = "AL";
-  document.querySelectorAll("#btn-tapa-formula-pc, #btn-tapa-formula-al").forEach((b) => b.classList.remove("selected"));
-  ev.currentTarget.classList.add("selected");
   impactAt(ev.currentTarget, "46,134,193");
   actualizarBotonAccesorio();
 });
@@ -804,7 +779,6 @@ document.getElementById("btn-procesar").addEventListener("click", async (ev) => 
     pieza_grande: !!state.piezaGrande,
     modo_accesorio: state.modoAccesorio,
     cantidad_pc: (state.modoAccesorio === "PC" || state.modoAccesorio === "PC_AL") ? state.cantidadPc : 0,
-    tapa_formula: state.modoAccesorio === "PC_AL" ? state.tapaFormula : null,
     pu: !!state.pu,
     lites: state.lites.map((l) => ({
       posicion: l.posicion,

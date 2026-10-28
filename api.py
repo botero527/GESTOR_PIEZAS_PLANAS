@@ -97,7 +97,6 @@ class Api:
               "pieza_grande": bool,          # global, una sola respuesta (como tecoflex)
               "modo_accesorio": "PC"|"AL"|"PC_AL"|None,
               "cantidad_pc": int,             # si modo_accesorio es "PC" o "PC_AL"
-              "tapa_formula": "PC"|"AL"|None, # solo si modo_accesorio == "PC_AL"
               "pu": bool,                      # independiente de PC/AL, siempre disponible
               "lites": [{"posicion":100,"tipo_cristal":...,"espesor":...,
                          "pintura":bool,"caja":bool}, ...],
@@ -123,7 +122,6 @@ class Api:
                 modo_accesorio=payload.get("modo_accesorio"),
                 cantidad_pc=int(payload.get("cantidad_pc") or 0),
                 pacha=bool(payload.get("pacha")),
-                tapa_formula=payload.get("tapa_formula"),
                 pu=bool(payload.get("pu")),
             )
             exito = True
