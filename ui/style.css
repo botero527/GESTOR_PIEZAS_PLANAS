@@ -346,6 +346,12 @@ body {
   background: var(--bg-panel-hover); border: 1px dashed var(--border-hover);
   font-size: 11.5px; color: var(--text-dim); font-family: "Consolas", monospace;
 }
+.nombre-preview.preview-error { color: var(--danger); border-color: var(--danger); font-family: inherit; }
+.simetria-row {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  font-size: 12.5px; color: var(--text); cursor: pointer;
+}
+#tabla-lites select.sel-pendiente { border-color: var(--danger); }
 
 .folder-box {
   display: flex; align-items: center; gap: 10px;

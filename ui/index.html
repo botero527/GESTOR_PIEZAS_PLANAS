@@ -50,13 +50,11 @@
       <div class="step-line"></div>
       <div class="step-dot" data-dot="tecoflex"><span class="dot-num">2</span><label>Tecoflex</label></div>
       <div class="step-line"></div>
-      <div class="step-dot" data-dot="tamano"><span class="dot-num">3</span><label>Tamaño</label></div>
+      <div class="step-dot" data-dot="datos"><span class="dot-num">3</span><label>Datos</label></div>
       <div class="step-line"></div>
-      <div class="step-dot" data-dot="datos"><span class="dot-num">4</span><label>Datos</label></div>
+      <div class="step-dot" data-dot="tabla"><span class="dot-num">4</span><label>Lites</label></div>
       <div class="step-line"></div>
-      <div class="step-dot" data-dot="tabla"><span class="dot-num">5</span><label>Lites</label></div>
-      <div class="step-line"></div>
-      <div class="step-dot" data-dot="accesorio"><span class="dot-num">6</span><label>PC / AL</label></div>
+      <div class="step-dot" data-dot="accesorio"><span class="dot-num">5</span><label>PC / AL</label></div>
     </div>
 
     <button class="btn-back" id="btn-back">&larr; Atrás</button>
@@ -122,26 +120,6 @@
         </div>
       </section>
 
-      <!-- Paso: tamaño de la pieza (global, como tecoflex) -->
-      <section class="step" data-step="tamano">
-        <div class="card card-hero card-center">
-          <h2>¿La pieza es grande/mediana o pequeña?</h2>
-          <p class="sub">Aplica para todos los lites (la tabla de compensación cambia según esto) y también
-             para la TAPA más adelante si eliges PC o AL.</p>
-
-          <div class="choice-row">
-            <button class="choice-btn choice-yes" id="btn-tamano-grande">
-              <span class="choice-icon">&#9679;</span>
-              <span class="choice-label">Grande / mediana</span>
-            </button>
-            <button class="choice-btn choice-no" id="btn-tamano-pequena">
-              <span class="choice-icon">&#9675;</span>
-              <span class="choice-label">Pequeña</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
       <!-- Paso: datos generales -->
       <section class="step" data-step="datos">
         <div class="card card-hero">
@@ -172,6 +150,12 @@
           </div>
           <div class="nombre-preview" id="nombre-preview">Ejemplo: se arma solo mientras escribes…</div>
 
+          <label class="simetria-row">
+            <span class="toggle"><input type="checkbox" id="chk-simetria" /><span class="toggle-slider"></span></span>
+            <span><strong>Simetría</strong> — además guarda la pieza contraria (todo espejado, con el tipo de pieza par)</span>
+          </label>
+          <div class="nombre-preview hide" id="simetria-preview"></div>
+
           <label class="field-label">Carpeta de destino</label>
           <div class="folder-box" id="folder-box">
             <span class="folder-icon">&#128193;</span>
@@ -201,7 +185,8 @@
                   <th>Tipo de cristal</th>
                   <th>Espesor</th>
                   <th>Pintura</th>
-                  <th>Caja</th>
+                  <th>Caso</th>
+                  <th>Notch</th>
                   <th>Compensación</th>
                 </tr>
               </thead>
@@ -317,6 +302,11 @@
             <div class="resultado-block">
               <div class="resultado-block-title">Archivos por lite</div>
               <div id="res-lites-list" class="res-lites-list"></div>
+            </div>
+
+            <div class="resultado-block hide" id="res-sim-block">
+              <div class="resultado-block-title">Archivos simétricos</div>
+              <div id="res-sim-list" class="res-lites-list"></div>
             </div>
 
             <div class="resultado-block">

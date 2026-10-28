@@ -94,12 +94,14 @@ class Api:
               "documento": {"name": ..., "path": ...},
               "tiene_tecoflex": bool,
               "pacha": bool,                  # global, requiere tiene_tecoflex=True
-              "pieza_grande": bool,          # global, una sola respuesta (como tecoflex)
+              "pieza_grande": bool,          # ya no se pregunta: la UI siempre manda False (pequeña)
+              "simetria": bool,               # además guarda la pieza contraria espejada
               "modo_accesorio": "PC"|"AL"|"PC_AL"|None,
               "cantidad_pc": int,             # si modo_accesorio es "PC" o "PC_AL"
               "pu": bool,                      # independiente de PC/AL, siempre disponible
               "lites": [{"posicion":100,"tipo_cristal":...,"espesor":...,
-                         "pintura":bool,"caja":bool}, ...],
+                         "pintura":bool,"caso":1|2|None,"caja":bool}, ...],
+                                              # "caja" se muestra como "Notch" en pantalla
               "codigo_vehiculo": "1890", "version": "000", "letra": "A",
               "tipo_pieza": "001",           # arman el nombre de los archivos
               "carpeta_destino": "C:/..."
@@ -123,6 +125,7 @@ class Api:
                 cantidad_pc=int(payload.get("cantidad_pc") or 0),
                 pacha=bool(payload.get("pacha")),
                 pu=bool(payload.get("pu")),
+                simetria=bool(payload.get("simetria")),
             )
             exito = True
             return {"ok": True, **resultado}

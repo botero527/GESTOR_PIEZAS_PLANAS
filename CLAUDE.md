@@ -2,157 +2,95 @@
 
 ## Quién es el usuario
 
-Andrés Botero (spina@agpglass.com), AGP Glass. Trátalo bro a bro, directo, sin rodeos ni relleno
-corporativo. Le gusta ir rápido pero SIEMPRE quiere que confirmes lógica de negocio antes de
-asumirla (son piezas reales de vidrio — un offset mal calculado es plata perdida). Desde el
-18-sept-2026 pidió explícitamente: **cada respuesta que toque código debe traer 3 tips cortos —
-teórico, técnico y práctico** — quiere ir mejorando como programador con cada sesión, no solo que
-le resuelvan el problema.
+Andrés Botero, Ingeniería/IT en AGP Glass (equipo con Laura Peláez, que define las reglas de negocio).
+Trato bro a bro, todo en español. **Antes de asumir una regla de negocio, preguntar** (son piezas
+reales de vidrio: un offset mal calculado es plata perdida). En cada entrega: explicar qué se hizo y
+por qué, y cerrar con 3 tips (teórico, técnico, lógica). Protocolo completo en
+`Documentos\CEREBRO\PROTOCOLO_TRABAJO_ANDRES.md`; lecciones en `CEREBRO\LECCIONES_APRENDIDAS.md`;
+estado del proyecto en `CEREBRO\proyectos\PIEZAS_PLANAS.md`.
 
-## ⚠️ LEE ESTO PRIMERO SI ERES UNA SESIÓN/CUENTA NUEVA DE CLAUDE
+## Qué es
 
-El 18-sept-2026 Andrés avisó que iba a cambiar de cuenta de Claude y pidió dejar todo documentado
-para que la sesión nueva "vaya a la par" sin perder nada. Este archivo ya está actualizado a esa
-fecha. Además hay un handoff más narrativo (con la historia de CÓMO se llegó a cada decisión, útil
-si algo de aquí no cuadra con lo que ves en el código) en:
+App de escritorio Python + **pywebview** (UI en `ui/`: HTML/CSS/JS) que maneja AutoCAD por COM
+(`pywin32`) para sacar los offsets de "piezas planas" (vidrio/policarbonato). Se empaqueta con
+PyInstaller (`PiezasPlanas.spec`) y se publica en
+`\\192.168.2.37\ingenieria\PRODUCCION\AGP PLANOS TECNICOS\Users\ANDRES ING\PIEZAS_PLANAS\`
+(si el .exe está en uso, se copia como `_v2`, `_v3`...). No se actualiza solo: recompilar y copiar.
 
-- `C:\Users\abotero\OneDrive - AGP GROUP\Documentos\_respaldo_memoria_claude\HANDOFF_PIEZAS_PLANAS.md`
-- `C:\Users\abotero\OneDrive - AGP GROUP\Documentos\CEREBRO\proyectos\PIEZAS_PLANAS.md` (misma info, formato "CEREBRO")
+## Modelo del dibujo
 
-Si algo de negocio no te cuadra (una regla de compensación, un offset, el orden del wizard),
-**pregunta con AskUserQuestion antes de asumir** — así se ha trabajado este proyecto desde el
-principio y es como Andrés prefiere.
+- `PERIMETRO` (alias `0100`): **siempre una sola** polilínea cerrada, reusada para todos los lites.
+- `OFFSET` (alias `BASE`): opcional; si existe, todo lo que no es el lite 100 sale de ahí.
+- **Regla de oro:** cada resultado sale de su fuente original, nunca encadenado sobre otro resultado.
+- **Fuente del resto** (`fuente_resto`: lites ≠ 100, PC, TAPA de PC, PU) = TECOFLEX de la base si
+  hay tecoflex; si no, OFFSET si existe; si no, PERIMETRO. Las 4 combinaciones
+  (hay_offset × tiene_tecoflex) se prueban por separado: ya hubo un bug en una de ellas.
+- **Lite 100**: siempre desde PERIMETRO crudo, salvo **PACHA** (entonces desde TECOFLEX).
 
-## Qué es este proyecto (reescrito por completo, sept-2026)
+## Asistente (5 pasos)
 
-App de escritorio Python + **pywebview** (UI en HTML/CSS/JS, NO CustomTkinter — eso se abandonó)
-que automatiza AutoCAD vía COM (`pywin32`) para trazar offsets de corte/perforación/tapas sobre DWG
-de "piezas planas" (vidrio/policarbonato con marcos). Se empaqueta como .exe con PyInstaller y se
-distribuye por red — no necesita Python instalado en la PC que lo usa.
+1. **Archivo** abierto en AutoCAD (bloquea dibujos nunca guardados en disco).
+2. **¿Tecoflex?** (3 mm hacia adentro, layer `TECOFLEX` o `TECOFLEX_BASE`) → si sí, **¿PACHA?**
+3. **Datos**: cantidad de lites, nombre en 4 campos (vehículo + versión + letra + tipo de pieza),
+   carpeta y casilla **Simetría**.
+4. **Lites**: tipo de cristal (por defecto Sodalime/White), espesor, pintura, **Caso** (1 o 2, solo
+   con pintura y obligatorio), **Notch** (en el código sigue siendo `caja`: misma columna de la tabla
+   de compensación, solo cambió el nombre en pantalla).
+5. **PC / AL / PC y AL** (+ cantidad de PC) y **¿PU?**
 
-**Desplegado en:**
-`\\192.168.2.37\ingenieria\PRODUCCION\AGP PLANOS TECNICOS\Users\ANDRES ING\PIEZAS_PLANAS\PiezasPlanas_AGP.exe`
-Cada vez que se cambia código hay que recompilar (`py -m PyInstaller PiezasPlanas.spec` o
-`build_exe.bat`) y volver a copiar el .exe a esa ruta — no se actualiza solo.
+No hay paso de tamaño: siempre se calcula como pieza pequeña (`pieza_grande=False`).
 
-### Modelo del dibujo (importante, no es intuitivo)
+## Salidas
 
-El layer `PERIMETRO` en el DWG SIEMPRE tiene una sola pieza (una polilínea cerrada) — no una por
-lite. Esa misma pieza se reusa para calcular TODOS los lites/PC/TAPA que pida el usuario. Regla de
-oro repetida varias veces por Andrés: **cada cálculo sale SIEMPRE del PERIMETRO/TECOFLEX original,
-nunca se encadena un resultado sobre otro** (el offset de un lite nunca sale del offset ya
-calculado de otro lite).
+| Salida | Cálculo | Nombre (1890 + 000 + A, pieza 001) |
+|---|---|---|
+| Lite N | compensación de `compensacion.py` hacia afuera; layer `<pos>_<mm>` | `1890000A{N/100}001.dxf` |
+| PC_1..PC_n | escalera hacia adentro desde la fuente del resto: `cantidad+3` bajando a 4 mm **medidos desde la base cruda** (con tecoflex se resta 3) | `1890000APC001.dxf`, **espejado** |
+| TAPA | PC: 1 mm hacia afuera de la fuente del resto. AL o PC+AL: copia exacta de PERIMETRO | `1890000A9001.dxf` |
+| PU | 10 mm hacia afuera de la fuente del resto | `1890000APU001.dxf` |
+| Comparativo | todo lo fabricado en fila (cada slot con su base + tecoflex + resultado) | `1890000A001_comparativo.dxf` |
 
-### Flujo del wizard (6 pasos + procesar)
+- Todo en **DXF** (`SaveAs(..., 65)` desde una copia DWG temporal), cada archivo solo con su
+  resultado, esquina inferior izquierda en (0,0,0) y purgado. El archivo principal queda en DWG.
+- **Caso 1**: mismo resultado, archivo del lite espejado. Caso 2: sin cambios.
+- **Simetría**: además guarda el **espejo del archivo normal** de cada lite, PC, TAPA y PU, con el
+  tipo de pieza par de `PARES_SIMETRIA` (copia de `_PARES_SIMETRIA` de MODULO_5: 001↔002 …
+  028↔029). Espejo de algo ya espejado (PC, Caso 1) = sin espejar. Sin par → error. El
+  comparativo nunca lleva simetría.
 
-1. **Archivo** — detecta DWG(s) abiertos en cualquier instancia de AutoCAD. Si el documento no se
-   ha guardado nunca en disco (ej. `Drawing1.dwg` sin ruta real), se bloquea la selección con aviso
-   — sin esto, el guardado final revienta con errores crípticos.
-2. **Tecoflex** — ¿tiene? Si sí: offset 3mm hacia ADENTRO de PERIMETRO, una sola vez → layer
-   `TECOFLEX` (rojo). Ese resultado (o PERIMETRO si no hay tecoflex) es la "fuente común" para todo
-   lo demás.
-3. **Tamaño** — ¿grande/mediana o pequeña? Global, una sola respuesta (como tecoflex), afecta la
-   tabla de compensación de TODOS los lites y la lógica de la TAPA.
-4. **Datos** — cantidad de lites (usuario la escribe, genera posiciones 100/200/300... de 100 en
-   100), nombre general de la pieza, carpeta de destino.
-5. **Lites** — tabla, una fila por posición: tipo de cristal (Sodalime/White, Aluminum, **Otros**),
-   espesor (dropdown validado contra la tabla — si no existe, mensaje de error CHISTOSO a propósito,
-   ver `compensacion.py`), pintura, caja → compensación calculada en vivo. "Otros" ignora
-   espesor/pintura/caja: siempre 2.5mm hacia afuera, fijo.
-6. **PC / AL** — ¿es PC o AL? AL solo está disponible si hay TECOFLEX ("lo que no tiene TECOFLEX no
-   tiene AL" — regla textual de Andrés). Si PC: cantidad entera → offsets descendentes
-   `cantidad+3, cantidad+2, ..., 4` (1 PC→4mm, 2→5,4, 3→6,5,4...), cada uno independiente desde la
-   fuente común, capas `PC_1..PC_n`. TAPA siempre se genera si se eligió PC o AL: pieza pequeña →
-   2mm hacia adentro de la fuente común; grande/mediana → si hay tecoflex, el PERIMETRO original tal
-   cual (sin tocar); si no hay tecoflex, 1mm hacia afuera del PERIMETRO.
+## Archivos
 
-**Guardado:** archivo principal (SaveAs sobre el original), un DWG independiente por lite, uno para
-PC (con todos los PC_1..PC_n + TAPA), uno para TAPA sola, y un comparativo (todas las piezas en fila
-con etiqueta de posición, para revisar visualmente que compensó bien).
+- `main.py` — bootstrap pywebview. **Nunca guardar la ventana como atributo del objeto js_api**
+  (`self.window = ...`): pywebview recorre sus atributos y entra en recursión infinita al arrancar.
+  Usar `webview.windows[0]` en el momento. Maximizar: pywebview 6 no tiene `is_maximized`, se lleva
+  un bool `_maximizada` sincronizado con `events.maximized/restored`.
+- `api.py` — puente único UI↔Python; `procesar(payload)` mide el tiempo real de cada proceso.
+- `compensacion.py` — tabla de compensación + mensajes de error chistosos a propósito.
+- `lites_processor.py` — toda la lógica: detección de layers por alias, offsets, PC/AL/TAPA/PU,
+  guardado por copia (`_guardar_solo_layers`, `_espejar_horizontal`, `_centrar_en_origen`,
+  `_guardar_comparativo` con slots), `_enumerar_msp_seguro()` (pide `doc.ModelSpace` fresco en cada
+  reintento), `_retry_com` / `_retry_cualquier_error`, `_purgar_dibujo`.
+- `dxf_processor.py` — legacy; se reusan `get_all_open_documents`, `_get_live_doc`, `_ensure_layer`
+  (blindado contra timing de COM), `_apply_layer_color` (fuerza `ConstantWidth = 0`).
+- `tracking.py` + `db_config.py` — tiempos de uso en Azure SQL (`AGP_Ingenieria`, esquema
+  `TIEMPOS`), todo "mejor esfuerzo": un fallo de red nunca frena la app.
+- `ui/pacman.js` — easter egg (escribir "pacman"), aislado de la lógica.
 
-### Compensación (tabla completa en `compensacion.py`)
+## Seguridad (leer antes de tocar git)
 
-| Tipo cristal | Espesor | Con pintura | Con caja | Sin caja | Pieza grande (todas las opciones) |
-|---|---|---|---|---|---|
-| Sodalime/White | 3,4,5,6 | 2.5 | 1 | N/A (matado de filos) | 2.5 |
-| Sodalime/White | 8 | 2.5 | 1 | 1 | 2.5 |
-| Sodalime/White | 10,12 | 2.5 | 1.5 | 1.5 | 2.5 |
-| Sodalime/White | 15,19 | 3 | 3 | 3 | 3 |
-| Aluminum | 5,6,5.8 | 1.5 | 1.5 | 1.5 | 2.5 |
-| Aluminum | 10 | 2.5 | 2.5 | 2.5 | 2.5 |
-| Otros | (no aplica) | — | — | — | siempre 2.5 |
+- `db_config.py` tiene la clave de Azure SQL y **no se sube** (`.gitignore`; plantilla en
+  `db_config.example.py`). Tampoco `build/`, `dist/` ni `__pycache__/`: el .exe lleva la clave
+  adentro.
+- El repo `botero527/GESTOR_PIEZAS_PLANAS` es **público** y el commit del 2026-10-01 tuvo la clave:
+  sigue en el historial. Pendiente: repo privado + rotar la clave de `DevIngenieria`.
+- El clasificador de Claude Code bloquea compilar con PyInstaller (embebe la clave): el build lo
+  corre Andrés (`py -m PyInstaller PiezasPlanas.spec --noconfirm`). Copiar el .exe a la red sí.
 
-"N/A (matado de filos)" no es error: significa "no hay nada extra que maquinar aparte del offset
-base de 3mm" — se muestra como aviso informativo, no como fallo.
+## Estilo y cuidado
 
-## Archivos clave
-
-- `main.py` — bootstrap de pywebview (ventana frameless, `WindowApi(Api)`).
-  **⚠️ REGLA DE ORO DE ESTE ARCHIVO: nunca guardar la ventana como atributo del objeto `js_api`**
-  (`self.window = window`). Causa un `RecursionError` en vivo al arrancar (pywebview intenta
-  describir el objeto expuesto a JS, se mete al control nativo de Windows, entra en loop infinito
-  con `AccessibilityObject`, la app se cierra sola). Usar siempre `webview.windows[0]` en el momento
-  que se necesite, dentro de cada método — patrón ya probado en PipeMirror.
-- `api.py` — clase `Api`, único puente pywebview↔Python. Método central: `procesar(payload)`.
-- `compensacion.py` — tabla de compensación + `espesores_validos()` + mensajes de error chistosos.
-- `lites_processor.py` — lógica real: detección/validación de PERIMETRO (debe ser UNA sola pieza
-  cerrada), offsets, PC/AL/TAPA, guardado por copia (`_guardar_lite_independiente`,
-  `_guardar_por_layers`, `_guardar_comparativo`). `_retry_com()` reintenta ante AutoCAD ocupado.
-  `_verificar_carpeta_escribible()` valida permisos ANTES de tocar el dibujo (falla rápido y claro
-  en vez de ofsetear todo y reventar al final). `_traducir_error_guardado()` explica en español las
-  causas comunes de un fallo de `SaveAs` (AutoCAD siempre da el mismo error genérico de COM sin
-  decir la causa real).
-- `dxf_processor.py` — legacy: `get_all_open_documents()` / `_get_live_doc()` (SÍ se reusan en
-  `lites_processor.py`), y la lógica VIEJA de PC/AL simple (`process_dxf`, offsets fijos 1mm/2mm)
-  que quedó **congelada, sin usar** por si se retoma ese flujo original más adelante. No borrar.
-- `ui/` — pywebview: `index.html` + `style.css` + `app.js` (wizard) + `pacman.js` (easter egg, ver
-  abajo). Paleta celeste/blanco/gris de AGP, reusa patrones de PipeMirror (titlebar frameless
-  arrastrable, canvas de partículas, shockwave en botones).
-- `PiezasPlanas.spec` + `build_exe.bat` — build con PyInstaller (`datas=[('ui','ui')]`,
-  hiddenimports pywin32).
-- `requirements.txt` — solo `pywin32` + `pywebview` (se limpiaron `customtkinter`/`ezdxf`/`shapely`,
-  ya no se usan).
-
-### Easter egg: Pac-Man (`ui/pacman.js`)
-
-Se activa escribiendo "pacman" en cualquier momento (buffer de teclas en `app.js`, se ignora si el
-foco está en un input/select real). Laberinto propio, 4 fantasmas con IA por personalidad
-(Blinky/Pinky/Inky/Clyde), power pellets, vidas, puntaje + highscore en `localStorage`. Cero riesgo
-para la lógica real (archivo aparte, no toca `api.py`/`lites_processor.py`/etc.).
-
-**Bug ya corregido (18-sept-2026):** el chequeo de "¿está alineado con la grilla?" usaba un umbral
-más grande que el avance por frame, así que Pac-Man y los fantasmas quedaban atrapados
-reenganchándose a la misma casilla cada frame sin moverse nunca. Se agregó una bandera `procesado`
-por entidad (comer pellet/decidir dirección de fantasma solo UNA vez por casilla; la dirección de
-Pac-Man se sigue reevaluando cada frame para que el teclado responda de inmediato incluso detenido).
-Si algún día se nota "lento" o "pegado" de nuevo, empieza a mirar por ahí.
-
-## Pendientes conocidos
-
-- `build_exe.bat`/`PiezasPlanas.spec` ya incluyen `ui/` — si se agregan más archivos a `ui/` (otro
-  asset, otra imagen), no hace falta tocar el spec (`datas=[('ui','ui')]` copia toda la carpeta).
-- `README.md` sigue vacío/corrupto — no se ha priorizado, no es bloqueante.
-- `prueba.py` es un archivo residual sin función (broma personal) — se puede borrar sin miedo.
-- No hay tests automatizados; validación es manual abriendo AutoCAD (aunque en esta sesión se probó
-  bastante contra el DWG real de ejemplo del usuario y con simulaciones headless en Node para el
-  Pac-Man — ver el HANDOFF para la metodología, vale la pena reusarla).
-- La lógica vieja de PC/AL (`dxf_processor.process_dxf`) sigue sin integrarse al flujo nuevo — quedó
-  reemplazada por la lógica de PC/AL/TAPA de `lites_processor.py`. No se ha discutido si hace falta
-  retomar algo de la vieja.
-- Repo sin `.gitignore` — `build/`, `dist/`, `__pycache__` quedan trackeados en git (deuda técnica
-  heredada, no se ha tocado).
-
-## Estilo de trabajo
-
-- Comentarios en código en español, scripts simples y directos, sin sobre-ingeniería.
-- No hay credenciales ni conexiones de red en este proyecto — todo es automatización COM local con
-  AutoCAD (aparte de la ruta de red interna de despliegue del .exe, que no es secreta).
-- **Nunca matar `acad.exe` a la fuerza sin confirmar que no hay una sesión real del usuario en
-  curso** — pasó una vez por error en esta sesión mientras Andrés estaba conectado por AnyDesk
-  usando la app en ese mismo momento. Preguntar o verificar antes.
-- Cuando algo de la lógica de negocio no cuadra (offsets, capas, compensaciones, orden del wizard),
-  usar `AskUserQuestion` en vez de asumir.
-- Validar contra el DWG de ejemplo real del usuario cuando se pueda
-  (`C:\Users\abotero\Downloads\PRUEBA PLANAS.dwg`) en vez de solo revisar código — varias veces reveló
-  supuestos incorrectos que la sola lectura de código no hubiera detectado (ej. al principio se
-  asumió "una polilínea por lite" cuando en realidad es una sola pieza física reusada N veces).
+- Comentarios en español, solo cuando explican un porqué no obvio. Igualar el estilo vecino.
+- **Nunca** cerrar AutoCAD ni sus documentos "todos de una": puede haber trabajo del usuario.
+  Cerrar los de prueba por nombre.
+- Probar contra AutoCAD real. Para espejos, usar una pieza asimétrica (trapecio); un rectángulo
+  espejado se ve igual y la prueba pasaría aunque el espejo no se aplicara.
+- Desplegar solo con OK explícito de Andrés.

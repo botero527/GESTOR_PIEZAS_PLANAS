@@ -109,6 +109,28 @@ GAP_COMPARATIVO = 50.0       # separación (mm) entre piezas en el archivo compa
 ALIAS_PERIMETRO = {"PERIMETRO", "0100"}
 ALIAS_OFFSET = {"OFFSET", "BASE"}
 
+# Pares LH/RH del tipo de pieza (Z_PIECE_TYPE), copiados de MODULO_5/app.py
+# (_PARES_SIMETRIA). El archivo simétrico usa el tipo de pieza par en el nombre.
+PARES_SIMETRIA = {
+    "001": "002", "002": "001",  # Lateral Delantero
+    "003": "004", "004": "003",  # Lateral Trasero
+    "005": "006", "006": "005",  # Ventilete Trasero
+    "007": "008", "008": "007",  # Cabina Trasera
+    "011": "012", "012": "011",  # Lateral Extendido
+    "013": "014", "014": "013",  # Posterior Izq/Der
+    "015": "016", "016": "015",  # Claraboya
+    "019": "020", "020": "019",  # Ventilete Delantero
+    "021": "022", "022": "021",  # Cabina Delantera
+    "023": "024", "024": "023",  # Cabina Superior
+    "026": "027", "027": "026",  # Parabrisas Der/Izq
+    "028": "029", "029": "028",  # Lateral Secundario
+}
+
+
+def tipo_pieza_simetrico(tipo_pieza):
+    """Tipo de pieza de la pieza contraria (LH<->RH), o None si no tiene par."""
+    return PARES_SIMETRIA.get(str(tipo_pieza).strip().zfill(3))
+
 # AutoCAD necesita editar en DWG (formato nativo), pero los archivos de
 # salida (lite/PC/TAPA/comparativo) deben quedar en DXF. AC2018_DXF=65 es
 # una constante fija confirmada en la documentación oficial de Autodesk —
@@ -441,7 +463,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
                     tipo_pieza: str, carpeta_destino: str,
                     pieza_grande: bool = False, modo_accesorio: str = None,
                     cantidad_pc: int = 0, pacha: bool = False,
-                    pu: bool = False) -> dict:
+                    pu: bool = False, simetria: bool = False) -> dict:
     """
     lites: lista de dicts, uno por lite (posición 100, 200, 300...):
         {"posicion": 100, "tipo_cristal": "SODALIME_WHITE", "espesor": 8,
@@ -497,9 +519,20 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
     está activo, se calcula por separado para cada fuente (PERIMETRO ->
     layer TECOFLEX, OFFSET -> layer TECOFLEX_BASE).
 
+    caso (por lite, solo si tiene pintura): 1 o 2. Caso 2 = todo igual.
+        Caso 1 = mismo resultado, pero el archivo de ese lite se guarda
+        espejado horizontalmente.
+
+    simetria: True/False. Además de los archivos normales, guarda la
+        pieza contraria de cada lite, PC, TAPA y PU: el ESPEJO del archivo
+        normal (si el normal ya iba espejado, como PC o un lite Caso 1, el
+        simétrico queda sin espejar), con el tipo de pieza par en el
+        nombre (PARES_SIMETRIA, ej. 001 -> 002). El comparativo no cambia.
+
     Devuelve:
         {"main_output", "archivos_lites", "comparativo_output",
-         "archivo_pc", "archivo_tapa", "archivo_pu", "detalle", "warnings"}
+         "archivo_pc", "archivo_tapa", "archivo_pu", "archivos_simetricos",
+         "detalle", "warnings"}
     """
     if modo_accesorio in ("AL", "PC_AL") and not tiene_tecoflex:
         raise ValueError(
@@ -514,6 +547,15 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
             "PACHA necesita que la pieza tenga TECOFLEX — no puede haber "
             "PACHA sin TECOFLEX, revisa esa respuesta, bro."
         )
+    tipo_pieza_sim = tipo_pieza_simetrico(tipo_pieza) if simetria else None
+    if simetria and not tipo_pieza_sim:
+        raise ValueError(
+            f"El tipo de pieza {tipo_pieza} no tiene simétrico (no es una pieza "
+            "LH/RH). Desmarca Simetría o revisa el código de pieza."
+        )
+    for cfg in lites:
+        if cfg.get("pintura") and cfg.get("caso") not in (1, 2):
+            raise ValueError(f"Lite {cfg['posicion']}: con pintura hay que elegir Caso 1 o Caso 2.")
 
     pythoncom.CoInitialize()
     acad, doc = _get_live_doc(acad_doc)
@@ -653,6 +695,8 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
             "layer_resultado": layer_resultado,
             "base_layer_name": _nombre_base(pos),
             "tecoflex_layer_name": _nombre_tecoflex(pos),
+            # Caso 1 (solo con pintura): mismo resultado, archivo espejado.
+            "espejar": bool(cfg.get("pintura")) and cfg.get("caso") == 1,
         })
         detalle.append({
             "posicion": pos,
@@ -740,6 +784,21 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
 
     nombre_base = f"{codigo_vehiculo}{version}{letra}"  # sin tipo_pieza ni dígito/código de posición
 
+    # Pieza contraria (Simetría): el espejo del archivo normal, con el tipo de
+    # pieza par en el nombre. Espejo de un archivo que ya iba espejado (PC,
+    # lite Caso 1) = sin espejar.
+    archivos_simetricos = []
+
+    def _guardar_simetrico(etiqueta, codigo, layers, espejar_normal):
+        if not tipo_pieza_sim:
+            return
+        destino_sim = str(Path(carpeta_destino) / f"{nombre_base}{codigo}{tipo_pieza_sim}.dxf")
+        try:
+            _guardar_solo_layers(acad, original_path, destino_sim, layers, espejar=not espejar_normal)
+            archivos_simetricos.append({"etiqueta": etiqueta, "ruta": destino_sim})
+        except Exception as ex:
+            warnings.append(f"{etiqueta} simétrico: no se pudo guardar: {ex}")
+
     # ── Archivos independientes por lite (SOLO el resultado, centrado) ────
     archivos_lites = []
     for info in resultados_por_lite:
@@ -748,12 +807,14 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
         fname = f"{nombre_base}{digito_pos}{tipo_pieza}.dxf"
         destino = str(Path(carpeta_destino) / fname)
         try:
-            _guardar_solo_layers(acad, original_path, destino, {info["layer_resultado"]})
+            _guardar_solo_layers(acad, original_path, destino, {info["layer_resultado"]},
+                                 espejar=info["espejar"])
             archivos_lites.append({"posicion": pos, "ruta": destino})
         except Exception as ex:
             warnings.append(
                 f"Lite {pos}: no se pudo guardar el archivo independiente: {ex}"
             )
+        _guardar_simetrico(str(pos), digito_pos, {info["layer_resultado"]}, info["espejar"])
 
     # ── Archivo comparativo: TODO lo fabricado (lites + PC + TAPA + PU) ───
     slots = [
@@ -810,6 +871,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
             archivo_pc = destino
         except Exception as ex:
             warnings.append(f"No se pudo crear el archivo PC: {ex}")
+        _guardar_simetrico("PC", "PC", set(layers_pc), True)
 
     # ── Archivo TAPA (SOLO el layer TAPA, centrado) ───────────────────────
     # En el nombre, donde va el dígito de posición, para TAPA va literal "9".
@@ -822,6 +884,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
             archivo_tapa = destino
         except Exception as ex:
             warnings.append(f"No se pudo crear el archivo TAPA: {ex}")
+        _guardar_simetrico("TAPA", "9", {layer_tapa}, False)
 
     # ── Archivo PU (SOLO el layer PU, centrado) ───────────────────────────
     # En el nombre, donde va el dígito de posición, para PU va literal "PU".
@@ -834,6 +897,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
             archivo_pu = destino
         except Exception as ex:
             warnings.append(f"No se pudo crear el archivo PU: {ex}")
+        _guardar_simetrico("PU", "PU", {layer_pu}, False)
 
     return {
         "main_output": main_output,
@@ -842,6 +906,7 @@ def procesar_lites(acad_doc: dict, tiene_tecoflex: bool, lites: list,
         "archivo_pc": archivo_pc,
         "archivo_tapa": archivo_tapa,
         "archivo_pu": archivo_pu,
+        "archivos_simetricos": archivos_simetricos,
         "detalle": detalle,
         "warnings": warnings,
     }

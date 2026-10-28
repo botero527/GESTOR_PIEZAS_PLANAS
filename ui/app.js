@@ -188,13 +188,28 @@ function impactAt(el, colorRGB) {
 
 // ── Estado del wizard ─────────────────────────────────────────────────
 
-const STEP_ORDER = ["file", "tecoflex", "tamano", "datos", "tabla", "accesorio"];
+const STEP_ORDER = ["file", "tecoflex", "datos", "tabla", "accesorio"];
+
+// Pares LH/RH del tipo de pieza — misma tabla que MODULO_5 (_PARES_SIMETRIA).
+// Solo se usa en pantalla para avisar y mostrar el nombre; el backend valida igual.
+const PARES_SIMETRIA = {
+  "001": "002", "002": "001", "003": "004", "004": "003",
+  "005": "006", "006": "005", "007": "008", "008": "007",
+  "011": "012", "012": "011", "013": "014", "014": "013",
+  "015": "016", "016": "015", "019": "020", "020": "019",
+  "021": "022", "022": "021", "023": "024", "024": "023",
+  "026": "027", "027": "026", "028": "029", "029": "028",
+};
+function parSimetrico(tipoPieza) {
+  return PARES_SIMETRIA[String(tipoPieza).trim().padStart(3, "0")] || null;
+}
 
 const state = {
   documento: null,
   tieneTecoflex: null,
   pacha: null,
-  piezaGrande: null,
+  piezaGrande: false,    // ya no se pregunta: siempre pequeña
+  simetria: false,
   modoAccesorio: null,   // "PC" | "AL" | "PC_AL" | null
   pu: null,              // true | false | null — independiente de PC/AL
   cantidadPc: 1,
@@ -216,7 +231,8 @@ function resetState() {
   state.documento = null;
   state.tieneTecoflex = null;
   state.pacha = null;
-  state.piezaGrande = null;
+  state.piezaGrande = false;
+  state.simetria = false;
   state.modoAccesorio = null;
   state.pu = null;
   state.cantidadPc = 1;
@@ -232,12 +248,14 @@ function resetState() {
   document.getElementById("in-version").value = "";
   document.getElementById("in-letra").value = "";
   document.getElementById("in-tipo-pieza").value = "";
+  document.getElementById("chk-simetria").checked = false;
   actualizarPreviewNombre();
+  actualizarPreviewSimetria();
   document.getElementById("in-cantidad-pc").value = 1;
   document.getElementById("folder-box").classList.remove("chosen");
   document.getElementById("folder-text").textContent = "Sin carpeta seleccionada";
   document.getElementById("btn-datos-next").disabled = false;
-  document.querySelectorAll("#btn-tamano-grande, #btn-tamano-pequena, #btn-accesorio-pc, #btn-accesorio-al, " +
+  document.querySelectorAll("#btn-accesorio-pc, #btn-accesorio-al, " +
     "#btn-accesorio-pcal, #btn-pu-si, #btn-pu-no, #btn-pacha-si, #btn-pacha-no")
     .forEach((b) => b.classList.remove("selected"));
   document.getElementById("pacha-pregunta").classList.add("hide");
@@ -394,29 +412,16 @@ document.getElementById("btn-teco-no").addEventListener("click", (ev) => {
   document.getElementById("pacha-pregunta").classList.add("hide");
   document.querySelectorAll("#btn-pacha-si, #btn-pacha-no").forEach((b) => b.classList.remove("selected"));
   impactAt(ev.currentTarget, "100,116,139");
-  goStep("tamano", "fwd");
+  goStep("datos", "fwd");
 });
 
 document.getElementById("btn-pacha-si").addEventListener("click", (ev) => {
   state.pacha = true;
   impactAt(ev.currentTarget, "30,142,62");
-  goStep("tamano", "fwd");
+  goStep("datos", "fwd");
 });
 document.getElementById("btn-pacha-no").addEventListener("click", (ev) => {
   state.pacha = false;
-  impactAt(ev.currentTarget, "100,116,139");
-  goStep("tamano", "fwd");
-});
-
-// ── Paso: tamaño (global, aplica a todos los lites y a la TAPA) ──────
-
-document.getElementById("btn-tamano-grande").addEventListener("click", (ev) => {
-  state.piezaGrande = true;
-  impactAt(ev.currentTarget, "30,142,62");
-  goStep("datos", "fwd");
-});
-document.getElementById("btn-tamano-pequena").addEventListener("click", (ev) => {
-  state.piezaGrande = false;
   impactAt(ev.currentTarget, "100,116,139");
   goStep("datos", "fwd");
 });
@@ -448,8 +453,45 @@ function actualizarPreviewNombre() {
   preview.textContent =
     `Lite 100 → ${base}1${pieza}.dxf   ·   Lite 200 → ${base}2${pieza}.dxf   ·   TAPA → ${base}9${pieza}.dxf   ·   PC → ${base}PC${pieza}.dxf`;
 }
+
+// Vista previa del nombre simétrico, o aviso si el tipo de pieza no tiene par.
+function actualizarPreviewSimetria() {
+  const simPreview = document.getElementById("simetria-preview");
+  if (!state.simetria) {
+    simPreview.classList.add("hide");
+    return;
+  }
+  simPreview.classList.remove("hide");
+  const veh = document.getElementById("in-vehiculo").value.trim();
+  const ver = document.getElementById("in-version").value.trim();
+  const let_ = document.getElementById("in-letra").value.trim();
+  const pieza = document.getElementById("in-tipo-pieza").value.trim();
+  if (!pieza) {
+    simPreview.classList.remove("preview-error");
+    simPreview.textContent = "Escribe el tipo de pieza para ver su simétrico…";
+    return;
+  }
+  const par = parSimetrico(pieza);
+  if (!par) {
+    simPreview.classList.add("preview-error");
+    simPreview.textContent = `El tipo de pieza ${pieza} no tiene simétrico (no es una pieza LH/RH). Desmarca Simetría o revisa el código.`;
+    return;
+  }
+  simPreview.classList.remove("preview-error");
+  const base = `${veh}${ver}${let_}`;
+  simPreview.textContent =
+    `Simétrico (pieza ${par}) → Lite 100 → ${base}1${par}.dxf   ·   TAPA → ${base}9${par}.dxf   ·   PC → ${base}PC${par}.dxf`;
+}
+
 ["in-vehiculo", "in-version", "in-letra", "in-tipo-pieza"].forEach((id) => {
-  document.getElementById(id).addEventListener("input", actualizarPreviewNombre);
+  document.getElementById(id).addEventListener("input", () => {
+    actualizarPreviewNombre();
+    actualizarPreviewSimetria();
+  });
+});
+document.getElementById("chk-simetria").addEventListener("change", (ev) => {
+  state.simetria = ev.currentTarget.checked;
+  actualizarPreviewSimetria();
 });
 
 document.getElementById("btn-datos-next").addEventListener("click", (ev) => {
@@ -476,6 +518,11 @@ document.getElementById("btn-datos-next").addEventListener("click", (ev) => {
     impactAt(document.getElementById("btn-elegir-carpeta"), "217,48,37");
     return;
   }
+  if (state.simetria && !parSimetrico(piezaInput.value)) {
+    actualizarPreviewSimetria();
+    impactAt(document.getElementById("chk-simetria"), "217,48,37");
+    return;
+  }
 
   state.cantidadLites = cantidad;
   state.codigoVehiculo = vehInput.value.trim();
@@ -497,7 +544,8 @@ function construirLites(cantidad) {
       tipo_cristal: "",
       espesor: "",
       pintura: false,
-      caja: false,
+      caso: null,     // 1 | 2 — solo con pintura; Caso 1 guarda el lite espejado
+      caja: false,    // en pantalla se llama "Notch"; la tabla de compensación sigue siendo la misma
       compensacion: { estado: "pending" }, // pending | ok | error
     });
   }
@@ -528,6 +576,7 @@ async function renderTablaLites() {
       <td><select class="sel-tipo">${tipoOptions}</select></td>
       <td><select class="sel-espesor" disabled><option value="">—</option></select></td>
       <td><label class="toggle"><input type="checkbox" class="chk-pintura" /><span class="toggle-slider"></span></label></td>
+      <td><select class="sel-caso" disabled><option value="">—</option></select></td>
       <td><label class="toggle"><input type="checkbox" class="chk-caja" /><span class="toggle-slider"></span></label></td>
       <td class="comp-cell comp-pending">—</td>
     `;
@@ -536,7 +585,23 @@ async function renderTablaLites() {
     const selTipo = tr.querySelector(".sel-tipo");
     const selEspesor = tr.querySelector(".sel-espesor");
     const chkPintura = tr.querySelector(".chk-pintura");
+    const selCaso = tr.querySelector(".sel-caso");
     const chkCaja = tr.querySelector(".chk-caja");
+
+    // El Caso solo existe con pintura: al desmarcarla se borra la elección.
+    function sincronizarCaso() {
+      if (lite.pintura) {
+        if (selCaso.disabled) {
+          selCaso.innerHTML = `<option value="">Elegir…</option><option value="1">Caso 1</option><option value="2">Caso 2</option>`;
+          selCaso.disabled = false;
+        }
+      } else {
+        lite.caso = null;
+        selCaso.innerHTML = `<option value="">—</option>`;
+        selCaso.disabled = true;
+      }
+      selCaso.classList.toggle("sel-pendiente", lite.pintura && !lite.caso);
+    }
 
     selTipo.addEventListener("change", async () => {
       lite.tipo_cristal = selTipo.value;
@@ -545,6 +610,7 @@ async function renderTablaLites() {
       lite.caja = false;
       chkPintura.checked = false;
       chkCaja.checked = false;
+      sincronizarCaso();
 
       if (lite.tipo_cristal === "OTROS") {
         // "Otros" no usa espesor/pintura/caja: siempre 2.5mm hacia afuera.
@@ -568,8 +634,21 @@ async function renderTablaLites() {
       recalcularFila(lite, tr);
     });
 
-    chkPintura.addEventListener("change", () => { lite.pintura = chkPintura.checked; recalcularFila(lite, tr); });
+    chkPintura.addEventListener("change", () => {
+      lite.pintura = chkPintura.checked;
+      sincronizarCaso();
+      recalcularFila(lite, tr);
+    });
+    selCaso.addEventListener("change", () => {
+      lite.caso = selCaso.value ? parseInt(selCaso.value, 10) : null;
+      sincronizarCaso();
+      actualizarBotonProcesar();
+    });
     chkCaja.addEventListener("change", () => { lite.caja = chkCaja.checked; recalcularFila(lite, tr); });
+
+    // Material por defecto: Sodalime / White (el más común), se puede cambiar.
+    selTipo.value = "SODALIME_WHITE";
+    selTipo.dispatchEvent(new Event("change"));
   });
 
   actualizarBotonProcesar();
@@ -630,7 +709,9 @@ async function recalcularFila(lite, tr) {
 
 function actualizarBotonProcesar() {
   const btn = document.getElementById("btn-tabla-next");
-  const todasOk = state.lites.length > 0 && state.lites.every((l) => l.compensacion && l.compensacion.estado === "ok");
+  const todasOk = state.lites.length > 0 && state.lites.every((l) =>
+    l.compensacion && l.compensacion.estado === "ok" && (!l.pintura || l.caso === 1 || l.caso === 2)
+  );
   btn.disabled = !todasOk;
 }
 
@@ -780,11 +861,13 @@ document.getElementById("btn-procesar").addEventListener("click", async (ev) => 
     modo_accesorio: state.modoAccesorio,
     cantidad_pc: (state.modoAccesorio === "PC" || state.modoAccesorio === "PC_AL") ? state.cantidadPc : 0,
     pu: !!state.pu,
+    simetria: !!state.simetria,
     lites: state.lites.map((l) => ({
       posicion: l.posicion,
       tipo_cristal: l.tipo_cristal,
       espesor: l.espesor,
       pintura: l.pintura,
+      caso: l.pintura ? l.caso : null,
       caja: l.caja,
     })),
     codigo_vehiculo: state.codigoVehiculo,
@@ -855,6 +938,19 @@ function mostrarResultadoOk(r) {
   if (!litesList.children.length) {
     litesList.innerHTML = `<div class="doc-empty">No se generaron archivos individuales por lite.</div>`;
   }
+
+  const simBlock = document.getElementById("res-sim-block");
+  const simList = document.getElementById("res-sim-list");
+  simList.innerHTML = "";
+  (r.archivos_simetricos || []).forEach((item) => {
+    const chip = document.createElement("div");
+    chip.className = "res-lite-chip";
+    chip.innerHTML = `<span class="chip-pos"></span><span></span>`;
+    chip.querySelector(".chip-pos").textContent = item.etiqueta;
+    chip.querySelector("span:last-child").textContent = nombreArchivo(item.ruta);
+    simList.appendChild(chip);
+  });
+  simBlock.classList.toggle("hide", !simList.children.length);
 
   const detalleBody = document.getElementById("res-detalle-body");
   detalleBody.innerHTML = "";
